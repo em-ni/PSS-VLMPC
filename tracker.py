@@ -13,6 +13,21 @@ P2_yaml = os.path.join("calibration_images_cam2_640x480p", "projection_matrix.ya
 save_dir = "./data"
 output_file = "output.csv"
 
+# Colors range for detection
+# Define a color range for yellow
+lower_yellow = np.array([20, 100, 100])
+upper_yellow = np.array([35, 255, 255])
+
+# Define the color ranges for red
+lower_red1 = np.array([0, 140, 90])
+upper_red1 = np.array([6, 255, 255])
+lower_red2 = np.array([174, 140, 90])
+upper_red2 = np.array([179, 255, 255])
+
+# Define the color range for blue
+lower_blue = np.array([100, 100, 50])
+upper_blue = np.array([130, 255, 255])
+
 
 class Tracker:
     def __init__(self):
@@ -27,21 +42,65 @@ class Tracker:
         self.P2_matrix = self.load_projection_matrix(P2_yaml)
         print("Projection Matrix for Camera 2 (P2):\n", self.P2_matrix)
 
-    def detect_tip(self, img):
+    def detect_tip(self, frame):
         """
-        Input: img - Image from the camera
-        Output: x,y - Coordinates of the tip of the robot
+        Input: frame - Image from the camera
+        Output: x,y - Average coordinates of the red tip of the robot
         """
-        # Detect the tip of the robot in the image
-        return (0, 0)
+        # Transform the image to hsv
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    def detect_base(self, img):
+        # Make masks for red color
+        mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask_red = cv2.bitwise_or(mask_red1, mask_red2)
+
+        # Get the red tip points
+        red_tip = cv2.bitwise_and(frame, frame, mask=mask_red)
+        red_tip_points = np.where(red_tip > 0)
+        red_tip_points = np.column_stack((red_tip_points[1], red_tip_points[0]))
+
+        if red_tip_points.size == 0:
+            return np.nan, np.nan
+
+        # Get average of coorinates of point in red tip
+        red_tip_x = red_tip_points[:, 0]
+        red_tip_y = red_tip_points[:, 1]
+        x_tip = np.mean(red_tip_x)
+        y_tip = np.mean(red_tip_y)
+
+        return x_tip, y_tip
+
+    def detect_base(self, frame):
         """
-        Input: img - Image from the camera
-        Output: x,y - Coordinates of the base of the robot
+        Input: frame - Image from the camera
+        Output: x,y - Average coordinates of the base of the robot
         """
-        # Detect the base of the robot in the image
-        return (0, 0)
+        # Transform the image to hsv
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # Make mask for yellow color
+        mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+        # Get the yellow base points
+        yellow_base = cv2.bitwise_and(frame, frame, mask=mask_yellow)
+        yellow_base_gray = cv2.cvtColor(yellow_base, cv2.COLOR_BGR2GRAY)
+        _, yellow_base_thresh = cv2.threshold(
+            yellow_base_gray, 127, 255, cv2.THRESH_BINARY
+        )
+        yellow_base_edges = cv2.Canny(yellow_base_thresh, 50, 150)
+        yellow_base_points = np.where((yellow_base_edges > 0))
+        yellow_base_points = np.column_stack(
+            (yellow_base_points[1], yellow_base_points[0])
+        )
+
+        # Get average coordinates of yellow base
+        yellow_base_x = yellow_base_points[:, 0]
+        yellow_base_y = yellow_base_points[:, 1]
+        x_base = np.mean(yellow_base_x)
+        y_base = np.mean(yellow_base_y)
+
+        return x_base, y_base
 
     def get_image(self, cam_index, timestamp):
         """
@@ -81,9 +140,10 @@ class Tracker:
 
     def parse_data(self, data):
         """
-        msg format: "P 100 200 300\n"
-        or "W\n"
-        or "E\n"
+        Message protocol:
+        - pressure signal: "P 100 200 300\n"
+        - wait signal "W\n"
+        - exit signal "E\n"
         """
         # Parse the received data and update the pressure values
         command = ""
@@ -141,15 +201,23 @@ class Tracker:
                                         print("Waiting for the next command...")
                                         continue
                                     elif command == "measure":
+                                        # Get current timestamp
                                         timestamp = time.time()
+
+                                        # Take images from the cameras
                                         img1 = self.get_image(4, timestamp)
                                         img2 = self.get_image(2, timestamp)
+
+                                        # Triangulate the points
                                         tip_3d, base_3d = self.triangulate(img1, img2)
                                         print("Tip coordinates:", tip_3d)
                                         print("Base coordinates:", base_3d)
+
+                                        # Save the data
                                         self.save_data(
                                             pressure_values, tip_3d, base_3d, timestamp
                                         )
+
                                 except socket.timeout:
                                     continue
                         print("Connection closed")
