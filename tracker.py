@@ -10,21 +10,24 @@ import csv
 P1_yaml = os.path.join("calibration_images_cam4_640x480p", "projection_matrix.yaml")
 P2_yaml = os.path.join("calibration_images_cam2_640x480p", "projection_matrix.yaml")
 
-save_dir = "./data"
-output_file = "output.csv"
+today = time.strftime("%Y-%m-%d")
+time_now = time.strftime("%H-%M-%S")
+experiment_name = "exp_" + today + "_" + time_now
+save_dir = "./data/" + experiment_name
+output_file = save_dir + "/output_" + experiment_name + ".csv"
 
 # Colors range for detection
-# Define a color range for yellow
+# Yellow
 lower_yellow = np.array([20, 100, 100])
 upper_yellow = np.array([35, 255, 255])
 
-# Define the color ranges for red
+# Red
 lower_red1 = np.array([0, 140, 90])
 upper_red1 = np.array([6, 255, 255])
 lower_red2 = np.array([174, 140, 90])
 upper_red2 = np.array([179, 255, 255])
 
-# Define the color range for blue
+# Blue
 lower_blue = np.array([100, 100, 50])
 upper_blue = np.array([130, 255, 255])
 
@@ -141,25 +144,25 @@ class Tracker:
     def parse_data(self, data):
         """
         Message protocol:
-        - pressure signal: "P 100 200 300\n"
+        - volume signal: "V 100 200 300\n"
         - wait signal "W\n"
         - exit signal "E\n"
         """
         # Parse the received data and update the pressure values
         command = ""
-        pressure_values = None
+        volume_values = None
         msg = data.decode()
         if msg.startswith("E"):
             command = "exit"
         elif msg.startswith("W"):
             command = "wait"
-        elif msg.startswith("P"):
+        elif msg.startswith("V"):
             command = "measure"
 
         # Extract the pressure values
         if command == "measure":
-            pressure_values = [int(p) for p in msg.strip().split()[1:]]
-        return command, pressure_values
+            volume_values = [int(p) for p in msg.strip().split()[1:]]
+        return command, volume_values
 
     def run(self):
         """
@@ -193,7 +196,7 @@ class Tracker:
                                     line = f.readline()
                                     if not line:
                                         break  # Client closed connection
-                                    command, pressure_values = self.parse_data(line)
+                                    command, volume_values = self.parse_data(line)
                                     if command == "exit":
                                         print("Exiting connection...")
                                         break
@@ -215,7 +218,7 @@ class Tracker:
 
                                         # Save the data
                                         self.save_data(
-                                            pressure_values, tip_3d, base_3d, timestamp
+                                            volume_values, tip_3d, base_3d, timestamp
                                         )
 
                                 except socket.timeout:
@@ -224,14 +227,14 @@ class Tracker:
             except KeyboardInterrupt:
                 print("Server shutdown requested. Exiting...")
 
-    def save_data(self, pressure_values, tip_3d, base_3d, timestamp):
+    def save_data(self, volume_values, tip_3d, base_3d, timestamp):
         """
         Save data in a csv with columns:
         timestamp - pressure_1 - pressure_2 - ... - tip_x - tip_y - tip_z - base_x - base_y - base_z
         """
         header = (
             ["timestamp"]
-            + [f"pressure_{i+1}" for i in range(len(pressure_values))]
+            + [f"pressure_{i+1}" for i in range(len(volume_values))]
             + ["tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
         )
         file_exists = os.path.isfile(output_file)
@@ -248,7 +251,7 @@ class Tracker:
                 base_3d.flatten().tolist() if hasattr(base_3d, "flatten") else base_3d
             )
 
-            writer.writerow([timestamp] + pressure_values + tip_list + base_list)
+            writer.writerow([timestamp] + volume_values + tip_list + base_list)
 
     def sim_server(self, host="127.0.0.1", port=12345):
         """
@@ -263,7 +266,7 @@ class Tracker:
 
             while True:
                 # Send a message to the server
-                msg = "P 100 200 300\n"  # example pressure values
+                msg = "V 100 200 300\n"  # example pressure values
                 # msg = "W\n"  # Wait for the next command
                 # msg = "E\n"  # Exit the server
                 s.sendall(msg.encode())
