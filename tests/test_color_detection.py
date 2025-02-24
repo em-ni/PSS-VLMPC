@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import sys
+import os
 
 
 def main(image_path):
@@ -48,9 +50,12 @@ def main(image_path):
     cv2.imshow("Blue color detection", result_blue)
 
     # Save the result images
-    cv2.imwrite("data/test/yellow_detection_result.png", result_yellow)
-    cv2.imwrite("data/test/red_detection_result.png", result_red)
-    cv2.imwrite("data/test/blue_detection_result.png", result_blue)
+    output_dir = os.path.join("data", "test")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    cv2.imwrite(os.path.join(output_dir, "yellow_detection_result.png"), result_yellow)
+    cv2.imwrite(os.path.join(output_dir, "red_detection_result.png"), result_red)
+    cv2.imwrite(os.path.join(output_dir, "blue_detection_result.png"), result_blue)
 
     # Wait for the ESC key (27) to close the windows
     while True:
@@ -63,7 +68,6 @@ def main(image_path):
 
 
 if __name__ == "__main__":
-    import sys
 
     if len(sys.argv) > 1:
         main(sys.argv[1])

@@ -3,7 +3,7 @@ import os
 
 
 def take_photo(cam_index):
-    save_dir = "./data/test"
+    save_dir = os.path.join(".", "data", "test")
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 

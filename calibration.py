@@ -36,7 +36,8 @@ last = 20
 
 # Capture images of the calibration pattern
 images = [
-    cv2.imread(f"{folder_name}/image_{i}.jpg") for i in range(first, last + 1)
+    cv2.imread(os.path.join(folder_name, f"image_{i}.jpg"))
+    for i in range(first, last + 1)
 ]  # Assuming 20 images
 
 for img in images:

@@ -7,8 +7,8 @@ import pyvista as pv
 # ---------------------------
 # 1. Load the two images
 # ---------------------------
-img1_path = "./data/test/cam4.png"
-img2_path = "./data/test/cam2.png"
+img1_path = os.path.join("data", "test", "cam4.png")
+img2_path = os.path.join("data", "test", "cam2.png")
 
 img1 = cv2.imread(img1_path)
 img2 = cv2.imread(img2_path)

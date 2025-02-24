@@ -13,8 +13,8 @@ P2_yaml = os.path.join("calibration_images_cam2_640x480p", "projection_matrix.ya
 today = time.strftime("%Y-%m-%d")
 time_now = time.strftime("%H-%M-%S")
 experiment_name = "exp_" + today + "_" + time_now
-save_dir = "./data/" + experiment_name
-output_file = save_dir + "/output_" + experiment_name + ".csv"
+save_dir = os.path.join(".", "data", experiment_name)
+output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
 
 # Colors range for detection
 # Yellow
@@ -206,20 +206,32 @@ class Tracker:
                                     elif command == "measure":
                                         # Get current timestamp
                                         timestamp = time.time()
+                                        try:
+                                            # Take images from the cameras
+                                            img1 = self.get_image(4, timestamp)
+                                            img2 = self.get_image(2, timestamp)
+                                        except Exception as e:
+                                            print(f"Error in get_image: {e}")
+                                            continue
 
-                                        # Take images from the cameras
-                                        img1 = self.get_image(4, timestamp)
-                                        img2 = self.get_image(2, timestamp)
+                                        try:
+                                            # Triangulate the points
+                                            tip_3d, base_3d = self.triangulate(
+                                                img1, img2
+                                            )
+                                            print("Tip coordinates:", tip_3d)
+                                            print("Base coordinates:", base_3d)
 
-                                        # Triangulate the points
-                                        tip_3d, base_3d = self.triangulate(img1, img2)
-                                        print("Tip coordinates:", tip_3d)
-                                        print("Base coordinates:", base_3d)
-
-                                        # Save the data
-                                        self.save_data(
-                                            volume_values, tip_3d, base_3d, timestamp
-                                        )
+                                            # Save the data
+                                            self.save_data(
+                                                volume_values,
+                                                tip_3d,
+                                                base_3d,
+                                                timestamp,
+                                            )
+                                        except Exception as e:
+                                            print(f"Error in triangulate: {e}")
+                                            continue
 
                                 except socket.timeout:
                                     continue
