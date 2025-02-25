@@ -75,7 +75,7 @@ class Durability:
                                 axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
                                 axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
                                 time.sleep(0.2)
-                                new_msg = f"V {position_i}, {position_j}, {position_k}\n"
+                                new_msg = f"V {position_i} {position_j} {position_k}\n"
                                 self.update_msg(new_msg)
                                 position_k = initial_pos + k * stepSize
                                 stepCounter += 1
@@ -88,7 +88,7 @@ class Durability:
                                 axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
                                 axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
                                 time.sleep(0.2)
-                                new_msg = f"V {position_i}, {position_j}, {position_k}\n"
+                                new_msg = f"V {position_i} {position_j} {position_k}\n"
                                 self.update_msg(new_msg)
                                 position_k = initial_pos + k * stepSize
                                 stepCounter += 1
@@ -99,7 +99,7 @@ class Durability:
                             axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
                             axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
                             axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
-                            new_msg = f"V {position_i}, {position_j}, {position_k}\n"
+                            new_msg = f"V {position_i} {position_j} {position_k}\n"
                             self.update_msg(new_msg)
                             time.sleep(0.2)
                             position_k = initial_pos + k * stepSize
@@ -132,45 +132,41 @@ class Durability:
         connection.close()
 
     def run(self):
-        """
-        Run the durability test
-        """
-        # Start the server in a separate thread
-        self.server_thread = threading.Thread(target=self.start_server, daemon=True)
-        self.server_thread.start()
-
-        # Cover the whole workspace
+        # Start the client thread to send data to the tracker server
+        self.client_thread = threading.Thread(target=self.run_client, daemon=True)
+        self.client_thread.start()
+        
+        # Execute the movement (which updates the message)
         self.move()
 
 
-    def start_server(self, host="127.0.0.1", port=12345):
-        """
-        Simulate a server that sends data to the client
-        """
-        time.sleep(1)  # Give the server time to start
-        print("Starting sim_server...")
+
+    def run_client(self, host="127.0.0.1", port=12345):
+        time.sleep(1)  # Give the tracker server time to start
+        print("Connecting to tracker server...")
         try:
-            # Create a socket and connect to the server
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((host, port))
-
-            while True:
-                if self.get_msg() == "E\n":
-                    break
-
-                # Send a message to the server
-                msg = self.get_msg()
-                s.sendall(msg.encode())
-                time.sleep(0.1)  # Add small delay between sends
-
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((host, port))
+                while True:
+                    current_msg = self.get_msg()
+                    # print(f"Sending message: {current_msg}")
+                    # Send the current message
+                    s.sendall(current_msg.encode())
+                    # If exit signal is sent, break out of the loop
+                    if current_msg == "E\n":
+                        print("Exit signal sent. Closing connection.")
+                        break
+                    time.sleep(0.1)  # Small delay between messages
         except ConnectionRefusedError:
-            print("Could not connect to server. Is it running?")
+            print("Could not connect to tracker server. Is it running?")
         except Exception as e:
-            print(f"Error in sim_server: {e}")
-        finally:
-            s.close()
+            print(f"Error in run_client: {e}")
+
 
     def update_msg(self, msg):
         self.msg = msg
 
     
+if __name__ == "__main__":
+    durability = Durability()
+    durability.run()

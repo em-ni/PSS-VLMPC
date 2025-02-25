@@ -7,7 +7,10 @@ import numpy as np
 import yaml
 import csv
 
-sim_server = "1"
+sim_server = "0"
+
+cam_1_index = 1
+cam_2_index = 0
 
 P1_yaml = os.path.join("calibration_images_cam4_640x480p", "projection_matrix.yaml")
 P2_yaml = os.path.join("calibration_images_cam2_640x480p", "projection_matrix.yaml")
@@ -163,7 +166,7 @@ class Tracker:
 
         # Extract the pressure values
         if command == "measure":
-            volume_values = [int(p) for p in msg.strip().split()[1:]]
+            volume_values = [float(p) for p in msg.strip().split()[1:]]
         return command, volume_values
 
     def run(self):
@@ -190,7 +193,7 @@ class Tracker:
             try:
                 while True:
                     conn, addr = s.accept()
-                    conn.settimeout(1)  # Set a timeout if needed
+                    # conn.settimeout(1)  # Set a timeout if needed
                     with conn:
                         with conn.makefile("rb") as f:
                             while True:
@@ -203,15 +206,15 @@ class Tracker:
                                         print("Exiting connection...")
                                         break
                                     elif command == "wait":
-                                        print("Waiting for the next command...")
+                                        print("\rWaiting for the next command...", end="", flush=True)
                                         continue
                                     elif command == "measure":
                                         # Get current timestamp
                                         timestamp = time.time()
                                         try:
                                             # Take images from the cameras
-                                            img1 = self.get_image(4, timestamp)
-                                            img2 = self.get_image(2, timestamp)
+                                            img1 = self.get_image(cam_1_index, timestamp)
+                                            img2 = self.get_image(cam_2_index, timestamp)
                                         except Exception as e:
                                             print(f"Error in get_image: {e}")
                                             continue
@@ -221,8 +224,8 @@ class Tracker:
                                             tip_3d, base_3d = self.triangulate(
                                                 img1, img2
                                             )
-                                            print("Tip coordinates:", tip_3d)
-                                            print("Base coordinates:", base_3d)
+                                            print("\rTip coordinates:", tip_3d, end="", flush=True)
+                                            print("\rBase coordinates:", base_3d, end="", flush=True)
 
                                             # Save the data
                                             self.save_data(
@@ -314,3 +317,7 @@ class Tracker:
         base_3d = base_4d[:3] / base_4d[3]
 
         return tip_3d, base_3d
+
+if __name__ == "__main__":
+    tracker = Tracker()
+    tracker.run()

@@ -16,7 +16,7 @@ if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
 # Camera settings
-camera_index = 2  # Change if you have multiple cameras
+camera_index = 0  # Change if you have multiple cameras
 # camera_index = "rtsp://:@192.168.1.1:8554/session0.mpg"
 capture_interval = 0.2  # Time in seconds between captures
 setting_time = 10  # Time in seconds to adjust camera settings
