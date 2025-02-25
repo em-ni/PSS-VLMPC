@@ -6,19 +6,7 @@ import cv2
 import numpy as np
 import yaml
 import csv
-import config
-
-# Colors range for detection
-# Define a color range for yellow
-lower_yellow = np.array([23, 88, 0])
-upper_yellow = np.array([36, 254, 255])
-
-# Define the color ranges for red
-lower_red1 = np.array([0, 55, 0])
-upper_red1 = np.array([5, 255, 255])
-lower_red2 = np.array([171, 55, 0])
-upper_red2 = np.array([180, 255, 255])
-
+import src.config as config
 
 class Tracker:
     def __init__(self, experiment_name, save_dir, csv_path):
@@ -45,8 +33,8 @@ class Tracker:
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         # Make masks for red color
-        mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
-        mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask_red1 = cv2.inRange(hsv, config.lower_red1, config.upper_red1)
+        mask_red2 = cv2.inRange(hsv, config.lower_red2, config.upper_red2)
         mask_red = cv2.bitwise_or(mask_red1, mask_red2)
 
         # Get the red tip points
@@ -74,7 +62,7 @@ class Tracker:
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         # Make mask for yellow color
-        mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        mask_yellow = cv2.inRange(hsv, config.lower_yellow, config.upper_yellow)
 
         # Get the yellow base points
         yellow_base = cv2.bitwise_and(frame, frame, mask=mask_yellow)
@@ -138,9 +126,6 @@ class Tracker:
                 img1_path = os.path.abspath(os.path.join(self.save_dir, img1_name))
                 img2_path = os.path.abspath(os.path.join(self.save_dir, img2_name))
 
-                print("Image 1 path:", img1_path)
-                print("Image 2 path:", img2_path)
-
                 # Check if the files exist.
                 if not os.path.exists(img1_path):
                     print("File does not exist:", img1_path)
@@ -161,8 +146,7 @@ class Tracker:
                 tip_3d, base_3d = self.triangulate(
                     img1, img2
                 )
-                print("\rTip coordinates:", tip_3d, end="", flush=True)
-                print("\rBase coordinates:", base_3d, end="", flush=True)
+                print("\rTip coordinates: {}   Base coordinates: {}".format(tip_3d.flatten(), base_3d.flatten()), end="", flush=True)
 
                 # Append the 3D coordinates to the csv file
                 # csv file columns: timestamp - volume_1 - volume_2 - volume_3 - tip_x - tip_y - tip_z - base_x - base_y - base_z
@@ -201,12 +185,12 @@ class Tracker:
 
         return tip_3d, base_3d
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    # Experiment name
-    experiment_name = "exp_2025-02-25_16-13-52"
-    save_dir = os.path.join(".", "data", experiment_name)
-    output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
+#     # Experiment name
+#     experiment_name = "exp_2025-02-25_16-13-52"
+#     save_dir = os.path.join(".", "data", experiment_name)
+#     output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
 
-    tracker = Tracker(experiment_name, save_dir, output_file)
-    tracker.run()
+#     tracker = Tracker(experiment_name, save_dir, output_file)
+#     tracker.run()

@@ -20,4 +20,5 @@ if __name__ == "__main__":
 
     # Triangulate the points to get 3d coordinates and plot the points cloud
     tracker.run()
+    points_cloud.get_points_from_csv()
     points_cloud.plot_points()

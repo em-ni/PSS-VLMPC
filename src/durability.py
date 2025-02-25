@@ -5,7 +5,7 @@ import numpy as np
 from zaber_motion import Units
 from zaber_motion.ascii import Connection
 import cv2
-import config
+import src.config as config
 
 class Durability:
     def __init__(self, save_dir, csv_path):
@@ -49,15 +49,6 @@ class Durability:
         # Open connection on COM3
         connection = Connection.open_serial_port('COM3')
         connection.enable_alerts()
-        
-        # demonstration
-        offset = 0  # 21 mm in comment, but offset is set to 0
-        initial_pos = 110 + offset  # mm
-
-        # PositionSweep Settings
-        steps = 5
-        stroke = 3  # mm
-        stepSize = stroke / steps
 
         try:
             # connection.enableAlerts()  # (commented out as in MATLAB)
@@ -74,9 +65,9 @@ class Durability:
             axis_3.home()
 
             # Move each axis to the minimum position
-            axis_1.move_absolute(initial_pos, Units.LENGTH_MILLIMETRES, False)
-            axis_2.move_absolute(initial_pos, Units.LENGTH_MILLIMETRES, False)
-            axis_3.move_absolute(initial_pos, Units.LENGTH_MILLIMETRES, False)
+            axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             time.sleep(1)
             
             userInput = input("Enter 2 to continue:\n")
@@ -89,15 +80,15 @@ class Durability:
                 k = 0
                 j_flipFlag = 1
                 k_flipFlag = 1
-                stepCounter = 0  # Python index starts at 0
+                stepCounter = 0  
                 
-                position_i = initial_pos
-                position_j = initial_pos
-                position_k = initial_pos
+                position_i = config.initial_pos
+                position_j = config.initial_pos
+                position_k = config.initial_pos
                 
-                while i <= steps + 1:
-                    while j <= steps:
-                        while k <= steps:
+                while i <= config.steps + 1:
+                    while j <= config.steps:
+                        while k <= config.steps:
                             if k == 0 and k_flipFlag == -1:
                                 k_flipFlag = -k_flipFlag
                                 position_matrix[:, stepCounter] = [position_i, position_j, position_k]
@@ -118,10 +109,10 @@ class Durability:
                                 # Save data
                                 self.save_data(volume_values, img1_path, img2_path, timestamp)
                                 
-                                position_k = initial_pos + k * stepSize
+                                position_k = config.initial_pos + k * config.stepSize
                                 stepCounter += 1
                                 break
-                            if k == steps and k_flipFlag == 1:
+                            if k == config.steps and k_flipFlag == 1:
                                 k_flipFlag = -k_flipFlag
                                 position_matrix[:, stepCounter] = [position_i, position_j, position_k]
                                 print(i, j, k)
@@ -141,7 +132,7 @@ class Durability:
                                 # Save data
                                 self.save_data(volume_values, img1_path, img2_path, timestamp)
 
-                                position_k = initial_pos + k * stepSize
+                                position_k = config.initial_pos + k * config.stepSize
                                 stepCounter += 1
                                 break
 
@@ -163,25 +154,25 @@ class Durability:
                             # Save data
                             self.save_data(volume_values, img1_path, img2_path, timestamp)
                             
-                            position_k = initial_pos + k * stepSize
+                            position_k = config.initial_pos + k * config.stepSize
                             k = k + k_flipFlag
                             stepCounter += 1
                         if j == 0 and j_flipFlag == -1:
                             j_flipFlag = -j_flipFlag
-                            position_j = initial_pos + j * stepSize
+                            position_j = config.initial_pos + j * config.stepSize
                             break
-                        if j == steps and j_flipFlag == 1:
+                        if j == config.steps and j_flipFlag == 1:
                             j_flipFlag = -j_flipFlag
-                            position_j = initial_pos + j * stepSize
+                            position_j = config.initial_pos + j * config.stepSize
                             break
                         j = j + j_flipFlag
-                        position_j = initial_pos + j * stepSize
-                    position_i = initial_pos + i * stepSize
+                        position_j = config.initial_pos + j * config.stepSize
+                    position_i = config.initial_pos + i * config.stepSize
                     i = i + 1
             
-            axis_1.move_absolute(initial_pos, Units.LENGTH_MILLIMETRES, False)
-            axis_2.move_absolute(initial_pos, Units.LENGTH_MILLIMETRES, False)
-            axis_3.move_absolute(initial_pos, Units.LENGTH_MILLIMETRES, False)
+            axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             time.sleep(0.2)
             print("Finished")
             
@@ -192,14 +183,14 @@ class Durability:
         connection.close()
 
     def run(self):
-        # Execute the movement (which updates the message)
+        # Execute the movement
         self.move()
 
 
     def save_data(self, volume_values, frame_1_name, frame_2_name, timestamp):
         """
         Save data in a csv with columns:
-        timestamp - pressure_1 - pressure_2 - ... - tip_x - tip_y - tip_z - base_x - base_y - base_z
+        timestamp - volume_1 - volume_2 - volume_3 - frame_1 - frame_2 - tip_x - tip_y - tip_z - base_x - base_y - base_z
         """
         header = (
             ["timestamp"]
@@ -217,8 +208,8 @@ class Durability:
 
 
     
-if __name__ == "__main__":
-    save_dir = config.save_dir
-    csv_path = config.csv_path
-    durability = Durability(save_dir, csv_path)
-    durability.run()
+# if __name__ == "__main__":
+#     save_dir = config.save_dir
+#     csv_path = config.csv_path
+#     durability = Durability(save_dir, csv_path)
+#     durability.run()

@@ -1,5 +1,4 @@
 import csv
-import os
 import pyvista as pv
 
 class PointsCloud:
@@ -8,7 +7,6 @@ class PointsCloud:
         self.base_points = []
         self.tip_points = []
         self.base_avg = []
-        self.get_points_from_csv()
         pass
 
     def get_points_from_csv(self):
@@ -56,7 +54,7 @@ class PointsCloud:
         plotter.show()
 
 
-if __name__ == "__main__":
-    csv_path = "C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-02-25_16-13-52\output_exp_2025-02-25_16-13-52.csv"
-    points_cloud = PointsCloud(csv_path)
-    points_cloud.plot_points()
+# if __name__ == "__main__":
+#     csv_path = "C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-02-25_16-13-52\output_exp_2025-02-25_16-13-52.csv"
+#     points_cloud = PointsCloud(csv_path)
+#     points_cloud.plot_points()
