@@ -12,14 +12,14 @@ def main(image_path):
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
     # Define a color range for yellow
-    lower_yellow = np.array([15, 80, 80])  # Wider range for yellow detection
-    upper_yellow = np.array([40, 255, 255])
+    lower_yellow = np.array([23, 88, 0])
+    upper_yellow = np.array([36, 254, 255])
 
     # Define the color ranges for red
-    lower_red1 = np.array([0, 140, 90])  # Slightly higher saturation and value
-    upper_red1 = np.array([6, 255, 255])
-    lower_red2 = np.array([174, 140, 90])  # Slightly higher saturation and value
-    upper_red2 = np.array([179, 255, 255])
+    lower_red1 = np.array([0, 55, 0])
+    upper_red1 = np.array([5, 255, 255])
+    lower_red2 = np.array([171, 55, 0])
+    upper_red2 = np.array([180, 255, 255])
 
     # Define the color range for blue
     lower_blue = np.array([100, 100, 50])  # Increase saturation

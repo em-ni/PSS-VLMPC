@@ -7,40 +7,35 @@ import numpy as np
 import yaml
 import csv
 
-sim_server = "0"
-
 cam_1_index = 1
 cam_2_index = 0
 
 P1_yaml = os.path.join("calibration_images_cam4_640x480p", "projection_matrix.yaml")
 P2_yaml = os.path.join("calibration_images_cam2_640x480p", "projection_matrix.yaml")
 
-today = time.strftime("%Y-%m-%d")
-time_now = time.strftime("%H-%M-%S")
-experiment_name = "exp_" + today + "_" + time_now
+# Experiment name
+experiment_name = "exp_2025-02-25_16-13-52"
 save_dir = os.path.join(".", "data", experiment_name)
 output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
 
 # Colors range for detection
-# Yellow
-lower_yellow = np.array([20, 100, 100])
-upper_yellow = np.array([35, 255, 255])
+# Define a color range for yellow
+lower_yellow = np.array([23, 88, 0])
+upper_yellow = np.array([36, 254, 255])
 
-# Red
-lower_red1 = np.array([0, 140, 90])
-upper_red1 = np.array([6, 255, 255])
-lower_red2 = np.array([174, 140, 90])
-upper_red2 = np.array([179, 255, 255])
-
-# Blue
-lower_blue = np.array([100, 100, 50])
-upper_blue = np.array([130, 255, 255])
+# Define the color ranges for red
+lower_red1 = np.array([0, 55, 0])
+upper_red1 = np.array([5, 255, 255])
+lower_red2 = np.array([171, 55, 0])
+upper_red2 = np.array([180, 255, 255])
 
 
 class Tracker:
     def __init__(self):
-        self.sim_server_bool = sim_server
-        self.sim_server_thread = None
+
+        self.csv_path = output_file
+
+        # Initialize the projection matrices
         self.P1_matrix = None
         self.P2_matrix = None
 
@@ -110,34 +105,17 @@ class Tracker:
 
         return x_base, y_base
 
-    def get_image(self, cam_index, timestamp):
+    def get_image_from_csv(self, img_path):
         """
-        Input: cam_index - Index of the camera
+        Input: row - Row of the csv file
+                column - Column of the csv file
         Output: img - Image from the camera
         """
-
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-
-        cap = cv2.VideoCapture(cam_index)
-        if not cap.isOpened():
-            print("Error: Cannot access the camera")
-            return
-
-        ret, frame = cap.read()
-        if not ret:
+        if img_path is None:
             print("Error: Could not read frame")
-            cap.release()
             return
-
-        photo_name = f"cam_{cam_index}_{timestamp}.png"
-        photo_path = os.path.join(save_dir, photo_name)
-        cv2.imwrite(photo_path, frame)
-        print(f"Photo saved at {photo_path}")
-
-        cap.release()
-        cv2.destroyAllWindows()
-
+        
+        frame = cv2.imread(img_path)
         return frame
 
     def load_projection_matrix(self, yaml_path):
@@ -146,155 +124,69 @@ class Tracker:
         P = np.array(data["projection_matrix"], dtype=np.float64)
         return P
 
-    def parse_data(self, data):
-        """
-        Message protocol:
-        - volume signal: "V 100 200 300\n"
-        - wait signal "W\n"
-        - exit signal "E\n"
-        """
-        # Parse the received data and update the pressure values
-        command = ""
-        volume_values = None
-        msg = data.decode()
-        if msg.startswith("E"):
-            command = "exit"
-        elif msg.startswith("W"):
-            command = "wait"
-        elif msg.startswith("V"):
-            command = "measure"
-
-        # Extract the pressure values
-        if command == "measure":
-            volume_values = [float(p) for p in msg.strip().split()[1:]]
-        return command, volume_values
-
     def run(self):
         """
         main function
         """
-        if self.sim_server_bool == "1":
-            # Start the simulation server
-            self.sim_server_thread = threading.Thread(
-                target=self.sim_server, daemon=True
-            )
-            self.sim_server_thread.start()
+        rows = []
+        # Get images from the csv file
+        with open(self.csv_path, mode="r") as csvfile:
+            reader = csv.reader(csvfile)
+            next(reader)
+            for row in reader:
+                
+                # Read 4th and 5th columns of the csv file
+                img1_rel_path = row[4]
+                img2_rel_path = row[5]
 
-        # Start the server
-        self.run_server()
+                # take everything between experiment_name and .png
+                img1_name = img1_rel_path[img1_rel_path.find(experiment_name)+len(experiment_name)+1:img1_rel_path.find(".png")+4]
+                img2_name = img2_rel_path[img2_rel_path.find(experiment_name)+len(experiment_name)+1:img2_rel_path.find(".png")+4]
 
-    def run_server(self, host="127.0.0.1", port=12345):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            # Allow the socket to reuse the address immediately after closing
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((host, port))
-            s.listen()
-            print(f"Server listening on {host}:{port}")
-            try:
-                while True:
-                    conn, addr = s.accept()
-                    # conn.settimeout(1)  # Set a timeout if needed
-                    with conn:
-                        with conn.makefile("rb") as f:
-                            while True:
-                                try:
-                                    line = f.readline()
-                                    if not line:
-                                        break  # Client closed connection
-                                    command, volume_values = self.parse_data(line)
-                                    if command == "exit":
-                                        print("Exiting connection...")
-                                        break
-                                    elif command == "wait":
-                                        print("\rWaiting for the next command...", end="", flush=True)
-                                        continue
-                                    elif command == "measure":
-                                        # Get current timestamp
-                                        timestamp = time.time()
-                                        try:
-                                            # Take images from the cameras
-                                            img1 = self.get_image(cam_1_index, timestamp)
-                                            img2 = self.get_image(cam_2_index, timestamp)
-                                        except Exception as e:
-                                            print(f"Error in get_image: {e}")
-                                            continue
+                # Get the full path of the images
+                img1_path = os.path.abspath(os.path.join(save_dir, img1_name))
+                img2_path = os.path.abspath(os.path.join(save_dir, img2_name))
 
-                                        try:
-                                            # Triangulate the points
-                                            tip_3d, base_3d = self.triangulate(
-                                                img1, img2
-                                            )
-                                            print("\rTip coordinates:", tip_3d, end="", flush=True)
-                                            print("\rBase coordinates:", base_3d, end="", flush=True)
+                print("Image 1 path:", img1_path)
+                print("Image 2 path:", img2_path)
 
-                                            # Save the data
-                                            self.save_data(
-                                                volume_values,
-                                                tip_3d,
-                                                base_3d,
-                                                timestamp,
-                                            )
-                                        except Exception as e:
-                                            print(f"Error in triangulate: {e}")
-                                            continue
+                # Check if the files exist.
+                if not os.path.exists(img1_path):
+                    print("File does not exist:", img1_path)
+                    continue
+                if not os.path.exists(img2_path):
+                    print("File does not exist:", img2_path)
+                    continue
 
-                                except socket.timeout:
-                                    continue
-                        print("Connection closed")
-            except KeyboardInterrupt:
-                print("Server shutdown requested. Exiting...")
+                # Load images using the helper function.
+                img1 = self.get_image_from_csv(img1_path)
+                img2 = self.get_image_from_csv(img2_path)
+                
+                if img1 is None or img2 is None:
+                    print("Error reading one of the images.")
+                    continue
 
-    def save_data(self, volume_values, tip_3d, base_3d, timestamp):
-        """
-        Save data in a csv with columns:
-        timestamp - pressure_1 - pressure_2 - ... - tip_x - tip_y - tip_z - base_x - base_y - base_z
-        """
-        header = (
-            ["timestamp"]
-            + [f"pressure_{i+1}" for i in range(len(volume_values))]
-            + ["tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
-        )
-        file_exists = os.path.isfile(output_file)
+                # Triangulate the points
+                tip_3d, base_3d = self.triangulate(
+                    img1, img2
+                )
+                print("\rTip coordinates:", tip_3d, end="", flush=True)
+                print("\rBase coordinates:", base_3d, end="", flush=True)
 
-        with open(output_file, mode="a", newline="") as csvfile:
+                # Append the 3D coordinates to the csv file
+                # csv file columns: timestamp - volume_1 - volume_2 - volume_3 - tip_x - tip_y - tip_z - base_x - base_y - base_z
+                row.append(tip_3d[0][0])
+                row.append(tip_3d[1][0])
+                row.append(tip_3d[2][0])
+                row.append(base_3d[0][0])
+                row.append(base_3d[1][0])
+                row.append(base_3d[2][0])
+                rows.append(row)
+
+        # Write the updated rows back to the CSV file (or to a new file)
+        with open(self.csv_path, mode="w", newline="") as csvfile:
             writer = csv.writer(csvfile)
-            if not file_exists:
-                writer.writerow(header)
-
-            tip_list = (
-                tip_3d.flatten().tolist() if hasattr(tip_3d, "flatten") else tip_3d
-            )
-            base_list = (
-                base_3d.flatten().tolist() if hasattr(base_3d, "flatten") else base_3d
-            )
-
-            writer.writerow([timestamp] + volume_values + tip_list + base_list)
-
-    def sim_server(self, host="127.0.0.1", port=12345):
-        """
-        Simulate a server that sends data to the client
-        """
-        time.sleep(1)  # Give the server time to start
-        print("Starting sim_server...")
-        try:
-            # Create a socket and connect to the server
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((host, port))
-
-            while True:
-                # Send a message to the server
-                msg = "V 100 200 300\n"  # example pressure values
-                # msg = "W\n"  # Wait for the next command
-                # msg = "E\n"  # Exit the server
-                s.sendall(msg.encode())
-                time.sleep(0.1)  # Add small delay between sends
-
-        except ConnectionRefusedError:
-            print("Could not connect to server. Is it running?")
-        except Exception as e:
-            print(f"Error in sim_server: {e}")
-        finally:
-            s.close()
+            writer.writerows(rows)
 
     def triangulate(self, img1, img2):
         """

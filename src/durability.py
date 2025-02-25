@@ -1,17 +1,52 @@
-import socket
-import threading
+import csv
+import os
 import time
 import numpy as np
 from zaber_motion import Units
 from zaber_motion.ascii import Connection
+import cv2
+
+cam_1_index = 1
+cam_2_index = 0
+today = time.strftime("%Y-%m-%d")
+time_now = time.strftime("%H-%M-%S")
+experiment_name = "exp_" + today + "_" + time_now
+save_dir = os.path.join(".", "data", experiment_name)
+output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
 
 class Durability:
     def __init__(self):
-        self.msg = "W\n"
+        pass
 
-    
-    def get_msg(self):
-        return self.msg    
+    def get_image(self, cam_index, timestamp):
+        """
+        Input: cam_index - Index of the camera
+        Output: img - Image from the camera
+        """
+
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        cap = cv2.VideoCapture(cam_index)
+        if not cap.isOpened():
+            print("Error: Cannot access the camera")
+            return
+
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Could not read frame")
+            cap.release()
+            return
+
+        photo_name = f"cam_{cam_index}_{timestamp}.png"
+        photo_path = os.path.join(save_dir, photo_name)
+        cv2.imwrite(photo_path, frame)
+        print(f"Photo saved at {photo_path}")
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+        return frame, photo_path
 
     def move(self):
         # Open connection on COM3
@@ -55,7 +90,6 @@ class Durability:
                 i = 1
                 j = 0
                 k = 0
-                i_flipFlag = 1
                 j_flipFlag = 1
                 k_flipFlag = 1
                 stepCounter = 0  # Python index starts at 0
@@ -75,8 +109,18 @@ class Durability:
                                 axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
                                 axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
                                 time.sleep(0.2)
-                                new_msg = f"V {position_i} {position_j} {position_k}\n"
-                                self.update_msg(new_msg)
+
+                                # Volume values
+                                volume_values = [position_i, position_j, position_k]
+
+                                # Take images from the cameras
+                                timestamp = time.time()
+                                _, img1_path = self.get_image(cam_1_index, timestamp)
+                                _, img2_path = self.get_image(cam_2_index, timestamp)
+
+                                # Save data
+                                self.save_data(volume_values, img1_path, img2_path, timestamp)
+                                
                                 position_k = initial_pos + k * stepSize
                                 stepCounter += 1
                                 break
@@ -88,8 +132,18 @@ class Durability:
                                 axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
                                 axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
                                 time.sleep(0.2)
-                                new_msg = f"V {position_i} {position_j} {position_k}\n"
-                                self.update_msg(new_msg)
+
+                                # Volume values
+                                volume_values = [position_i, position_j, position_k]
+
+                                # Take images from the cameras
+                                timestamp = time.time()
+                                _, img1_path = self.get_image(cam_1_index, timestamp)
+                                _, img2_path = self.get_image(cam_2_index, timestamp)
+
+                                # Save data
+                                self.save_data(volume_values, img1_path, img2_path, timestamp)
+
                                 position_k = initial_pos + k * stepSize
                                 stepCounter += 1
                                 break
@@ -99,9 +153,19 @@ class Durability:
                             axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
                             axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
                             axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
-                            new_msg = f"V {position_i} {position_j} {position_k}\n"
-                            self.update_msg(new_msg)
                             time.sleep(0.2)
+
+                            # Volume values
+                            volume_values = [position_i, position_j, position_k]
+
+                            # Take images from the cameras
+                            timestamp = time.time()
+                            _, img1_path = self.get_image(cam_1_index, timestamp)
+                            _, img2_path = self.get_image(cam_2_index, timestamp)
+
+                            # Save data
+                            self.save_data(volume_values, img1_path, img2_path, timestamp)
+                            
                             position_k = initial_pos + k * stepSize
                             k = k + k_flipFlag
                             stepCounter += 1
@@ -122,8 +186,7 @@ class Durability:
             axis_2.move_absolute(initial_pos, Units.LENGTH_MILLIMETRES, False)
             axis_3.move_absolute(initial_pos, Units.LENGTH_MILLIMETRES, False)
             time.sleep(0.2)
-            exit_msg = "E\n"
-            self.update_msg(exit_msg)
+            print("Finished")
             
         except Exception as exception:
             connection.close()
@@ -132,39 +195,29 @@ class Durability:
         connection.close()
 
     def run(self):
-        # Start the client thread to send data to the tracker server
-        self.client_thread = threading.Thread(target=self.run_client, daemon=True)
-        self.client_thread.start()
-        
         # Execute the movement (which updates the message)
         self.move()
 
 
+    def save_data(self, volume_values, frame_1_name, frame_2_name, timestamp):
+        """
+        Save data in a csv with columns:
+        timestamp - pressure_1 - pressure_2 - ... - tip_x - tip_y - tip_z - base_x - base_y - base_z
+        """
+        header = (
+            ["timestamp"]
+            + [f"volume_{i+1}" for i in range(len(volume_values))]
+            + ["frame_1", "frame_2"]
+        )
+        file_exists = os.path.isfile(output_file)
 
-    def run_client(self, host="127.0.0.1", port=12345):
-        time.sleep(1)  # Give the tracker server time to start
-        print("Connecting to tracker server...")
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((host, port))
-                while True:
-                    current_msg = self.get_msg()
-                    # print(f"Sending message: {current_msg}")
-                    # Send the current message
-                    s.sendall(current_msg.encode())
-                    # If exit signal is sent, break out of the loop
-                    if current_msg == "E\n":
-                        print("Exit signal sent. Closing connection.")
-                        break
-                    time.sleep(0.1)  # Small delay between messages
-        except ConnectionRefusedError:
-            print("Could not connect to tracker server. Is it running?")
-        except Exception as e:
-            print(f"Error in run_client: {e}")
+        with open(output_file, mode="a", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            if not file_exists:
+                writer.writerow(header)
 
+            writer.writerow([timestamp] + volume_values + [frame_1_name, frame_2_name])
 
-    def update_msg(self, msg):
-        self.msg = msg
 
     
 if __name__ == "__main__":
