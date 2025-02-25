@@ -2,11 +2,8 @@ import csv
 import os
 import pyvista as pv
 
-experiment_name = "exp_2025-02-25_16-13-52"
-csv_path = os.path.join("data", experiment_name, f"output_{experiment_name}.csv")
-
 class PointsCloud:
-    def __init__(self):
+    def __init__(self, csv_path):
         self.csv_path = csv_path
         self.base_points = []
         self.tip_points = []
@@ -60,5 +57,6 @@ class PointsCloud:
 
 
 if __name__ == "__main__":
-    points_cloud = PointsCloud()
+    csv_path = "C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-02-25_16-13-52\output_exp_2025-02-25_16-13-52.csv"
+    points_cloud = PointsCloud(csv_path)
     points_cloud.plot_points()

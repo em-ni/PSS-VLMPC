@@ -6,17 +6,7 @@ import cv2
 import numpy as np
 import yaml
 import csv
-
-cam_1_index = 1
-cam_2_index = 0
-
-P1_yaml = os.path.join("calibration_images_cam4_640x480p", "projection_matrix.yaml")
-P2_yaml = os.path.join("calibration_images_cam2_640x480p", "projection_matrix.yaml")
-
-# Experiment name
-experiment_name = "exp_2025-02-25_16-13-52"
-save_dir = os.path.join(".", "data", experiment_name)
-output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
+import config
 
 # Colors range for detection
 # Define a color range for yellow
@@ -31,18 +21,19 @@ upper_red2 = np.array([180, 255, 255])
 
 
 class Tracker:
-    def __init__(self):
-
-        self.csv_path = output_file
+    def __init__(self, experiment_name, save_dir, csv_path):
+        self.experiment_name = experiment_name
+        self.save_dir = save_dir
+        self.csv_path = csv_path
 
         # Initialize the projection matrices
         self.P1_matrix = None
         self.P2_matrix = None
 
         # Load the projection matrices
-        self.P1_matrix = self.load_projection_matrix(P1_yaml)
+        self.P1_matrix = self.load_projection_matrix(config.P1_yaml)
         print("Projection Matrix for Camera 1 (P1):\n", self.P1_matrix)
-        self.P2_matrix = self.load_projection_matrix(P2_yaml)
+        self.P2_matrix = self.load_projection_matrix(config.P2_yaml)
         print("Projection Matrix for Camera 2 (P2):\n", self.P2_matrix)
 
     def detect_tip(self, frame):
@@ -140,12 +131,12 @@ class Tracker:
                 img2_rel_path = row[5]
 
                 # take everything between experiment_name and .png
-                img1_name = img1_rel_path[img1_rel_path.find(experiment_name)+len(experiment_name)+1:img1_rel_path.find(".png")+4]
-                img2_name = img2_rel_path[img2_rel_path.find(experiment_name)+len(experiment_name)+1:img2_rel_path.find(".png")+4]
+                img1_name = img1_rel_path[img1_rel_path.find(self.experiment_name)+len(self.experiment_name)+1:img1_rel_path.find(".png")+4]
+                img2_name = img2_rel_path[img2_rel_path.find(self.experiment_name)+len(self.experiment_name)+1:img2_rel_path.find(".png")+4]
 
                 # Get the full path of the images
-                img1_path = os.path.abspath(os.path.join(save_dir, img1_name))
-                img2_path = os.path.abspath(os.path.join(save_dir, img2_name))
+                img1_path = os.path.abspath(os.path.join(self.save_dir, img1_name))
+                img2_path = os.path.abspath(os.path.join(self.save_dir, img2_name))
 
                 print("Image 1 path:", img1_path)
                 print("Image 2 path:", img2_path)
@@ -211,5 +202,11 @@ class Tracker:
         return tip_3d, base_3d
 
 if __name__ == "__main__":
-    tracker = Tracker()
+
+    # Experiment name
+    experiment_name = "exp_2025-02-25_16-13-52"
+    save_dir = os.path.join(".", "data", experiment_name)
+    output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
+
+    tracker = Tracker(experiment_name, save_dir, output_file)
     tracker.run()

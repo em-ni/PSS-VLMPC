@@ -5,17 +5,14 @@ import numpy as np
 from zaber_motion import Units
 from zaber_motion.ascii import Connection
 import cv2
-
-cam_1_index = 1
-cam_2_index = 0
-today = time.strftime("%Y-%m-%d")
-time_now = time.strftime("%H-%M-%S")
-experiment_name = "exp_" + today + "_" + time_now
-save_dir = os.path.join(".", "data", experiment_name)
-output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
+import config
 
 class Durability:
-    def __init__(self):
+    def __init__(self, save_dir, csv_path):
+        self.cam_1_index = config.cam_1_index
+        self.cam_2_index = config.cam_2_index
+        self.save_dir = save_dir
+        self.output_file = csv_path
         pass
 
     def get_image(self, cam_index, timestamp):
@@ -24,8 +21,8 @@ class Durability:
         Output: img - Image from the camera
         """
 
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
 
         cap = cv2.VideoCapture(cam_index)
         if not cap.isOpened():
@@ -39,7 +36,7 @@ class Durability:
             return
 
         photo_name = f"cam_{cam_index}_{timestamp}.png"
-        photo_path = os.path.join(save_dir, photo_name)
+        photo_path = os.path.join(self.save_dir, photo_name)
         cv2.imwrite(photo_path, frame)
         print(f"Photo saved at {photo_path}")
 
@@ -115,8 +112,8 @@ class Durability:
 
                                 # Take images from the cameras
                                 timestamp = time.time()
-                                _, img1_path = self.get_image(cam_1_index, timestamp)
-                                _, img2_path = self.get_image(cam_2_index, timestamp)
+                                _, img1_path = self.get_image(self.cam_1_index, timestamp)
+                                _, img2_path = self.get_image(self.cam_2_index, timestamp)
 
                                 # Save data
                                 self.save_data(volume_values, img1_path, img2_path, timestamp)
@@ -138,8 +135,8 @@ class Durability:
 
                                 # Take images from the cameras
                                 timestamp = time.time()
-                                _, img1_path = self.get_image(cam_1_index, timestamp)
-                                _, img2_path = self.get_image(cam_2_index, timestamp)
+                                _, img1_path = self.get_image(self.cam_1_index, timestamp)
+                                _, img2_path = self.get_image(self.cam_2_index, timestamp)
 
                                 # Save data
                                 self.save_data(volume_values, img1_path, img2_path, timestamp)
@@ -160,8 +157,8 @@ class Durability:
 
                             # Take images from the cameras
                             timestamp = time.time()
-                            _, img1_path = self.get_image(cam_1_index, timestamp)
-                            _, img2_path = self.get_image(cam_2_index, timestamp)
+                            _, img1_path = self.get_image(self.cam_1_index, timestamp)
+                            _, img2_path = self.get_image(self.cam_2_index, timestamp)
 
                             # Save data
                             self.save_data(volume_values, img1_path, img2_path, timestamp)
@@ -209,9 +206,9 @@ class Durability:
             + [f"volume_{i+1}" for i in range(len(volume_values))]
             + ["frame_1", "frame_2"]
         )
-        file_exists = os.path.isfile(output_file)
+        file_exists = os.path.isfile(self.output_file)
 
-        with open(output_file, mode="a", newline="") as csvfile:
+        with open(self.output_file, mode="a", newline="") as csvfile:
             writer = csv.writer(csvfile)
             if not file_exists:
                 writer.writerow(header)
@@ -221,5 +218,7 @@ class Durability:
 
     
 if __name__ == "__main__":
-    durability = Durability()
+    save_dir = config.save_dir
+    csv_path = config.csv_path
+    durability = Durability(save_dir, csv_path)
     durability.run()
