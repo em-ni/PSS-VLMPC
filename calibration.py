@@ -7,8 +7,8 @@ import os
 # camera_name = 'Misumi_200x200p'
 # camera_name = "Misumi_400x380p"
 # camera_name = "videoscope_1280x720p"
-# camera_name = "cam4_640x480p"
-camera_name = "cam2_640x480p"
+camera_name = "cam4_640x480p"
+# camera_name = "cam2_640x480p"
 
 # Define the chessboard size
 chessboard_size = (9, 6)
