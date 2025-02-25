@@ -7,6 +7,8 @@ import numpy as np
 import yaml
 import csv
 
+sim_server = "1"
+
 P1_yaml = os.path.join("calibration_images_cam4_640x480p", "projection_matrix.yaml")
 P2_yaml = os.path.join("calibration_images_cam2_640x480p", "projection_matrix.yaml")
 
@@ -34,7 +36,7 @@ upper_blue = np.array([130, 255, 255])
 
 class Tracker:
     def __init__(self):
-        self.sim_server_bool = "1"
+        self.sim_server_bool = sim_server
         self.sim_server_thread = None
         self.P1_matrix = None
         self.P2_matrix = None
@@ -312,8 +314,3 @@ class Tracker:
         base_3d = base_4d[:3] / base_4d[3]
 
         return tip_3d, base_3d
-
-
-if __name__ == "__main__":
-    tracker = Tracker()
-    tracker.run()
