@@ -56,13 +56,16 @@ class Durability:
             print("Found {} devices.".format(len(device_list)))
             print(device_list)
             
-            # Home each axis
+            # Get the axis
             axis_1 = device_list[0].get_axis(1)
-            axis_1.home()
             axis_2 = device_list[1].get_axis(1)
-            axis_2.home()
             axis_3 = device_list[2].get_axis(1)
-            axis_3.home()
+            
+            # Home each axis if home_first is True
+            if config.home_first: 
+                axis_1.home()
+                axis_2.home()
+                axis_3.home()
 
             # Move each axis to the minimum position
             axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
@@ -73,8 +76,6 @@ class Durability:
             userInput = input("Enter 2 to continue:\n")
             
             if userInput == '2':
-                position_matrix = np.zeros((3, 216))
-                
                 i = 1
                 j = 0
                 k = 0
@@ -91,7 +92,6 @@ class Durability:
                         while k <= config.steps:
                             if k == 0 and k_flipFlag == -1:
                                 k_flipFlag = -k_flipFlag
-                                position_matrix[:, stepCounter] = [position_i, position_j, position_k]
                                 print(i, j, k)
                                 axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
                                 axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
@@ -114,7 +114,6 @@ class Durability:
                                 break
                             if k == config.steps and k_flipFlag == 1:
                                 k_flipFlag = -k_flipFlag
-                                position_matrix[:, stepCounter] = [position_i, position_j, position_k]
                                 print(i, j, k)
                                 axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
                                 axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
@@ -136,7 +135,6 @@ class Durability:
                                 stepCounter += 1
                                 break
 
-                            position_matrix[:, stepCounter] = [position_i, position_j, position_k]
                             print(i, j, k)
                             axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
                             axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
@@ -186,7 +184,6 @@ class Durability:
         # Execute the movement
         self.move()
 
-
     def save_data(self, volume_values, frame_1_name, frame_2_name, timestamp):
         """
         Save data in a csv with columns:
@@ -207,7 +204,6 @@ class Durability:
             writer.writerow([timestamp] + volume_values + [frame_1_name, frame_2_name])
 
 
-    
 # if __name__ == "__main__":
 #     save_dir = config.save_dir
 #     csv_path = config.csv_path

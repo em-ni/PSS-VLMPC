@@ -39,9 +39,10 @@ lower_red2 = np.array([171, 55, 0])
 upper_red2 = np.array([180, 255, 255])
 
 # Move settings
+home_first = True
 offset = 0 
 initial_pos = 110 + offset
-steps = 2
+steps = 12
 stroke = 3  # mm
 stepSize = stroke / steps
 
