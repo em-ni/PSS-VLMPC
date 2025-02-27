@@ -7,8 +7,8 @@ import pyvista as pv
 # ---------------------------
 # 1. Load the two images
 # ---------------------------
-img1_path = os.path.join("data", "test", "cam4.png")
-img2_path = os.path.join("data", "test", "cam2.png")
+img1_path = os.path.join("data", "exp_2025-02-27_12-16-06", "cam_0_1740619763.7159758.png")
+img2_path = os.path.join("data", "exp_2025-02-27_12-16-06", "cam_1_1740619763.7159758.png")
 
 img1 = cv2.imread(img1_path)
 img2 = cv2.imread(img2_path)
@@ -23,9 +23,9 @@ if img1 is None or img2 is None:
 # Define HSV ranges for red, green, blue, and yellow.
 # Note: Red usually spans two ranges in HSV.
 color_ranges = {
-    "red": [((0, 100, 100), (10, 255, 255)), ((170, 100, 100), (180, 255, 255))],
+    "red": [((0, 55, 0), (5, 255, 255)), ((171, 55, 0), (180, 255, 255))],
     "blue": [((100, 150, 0), (140, 255, 255))],
-    "yellow": [((20, 100, 100), (30, 255, 255))],
+    "yellow": [((23, 88, 0), (36, 254, 255))],
 }
 
 
@@ -40,10 +40,8 @@ def detect_color_center(hsv_img, ranges):
         lower_np = np.array(lower, dtype=np.uint8)
         upper_np = np.array(upper, dtype=np.uint8)
         current_mask = cv2.inRange(hsv_img, lower_np, upper_np)
-        if mask is None:
-            mask = current_mask
-        else:
-            mask = cv2.bitwise_or(mask, current_mask)
+        mask = current_mask
+
 
     # Find contours in the mask.
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -113,14 +111,14 @@ def load_projection_matrix(yaml_path):
 
 
 # File paths for the projection matrices.
-P1_yaml = os.path.join("calibration_images_cam4_640x480p", "projection_matrix.yaml")
-P2_yaml = os.path.join("calibration_images_cam2_640x480p", "projection_matrix.yaml")
+P_right_yaml = os.path.join("calibration_images_cam_right_640x480p", "projection_matrix.yaml")
+P_left_yaml = os.path.join("calibration_images_cam_left_640x480p", "projection_matrix.yaml")
 
-P1_matrix = load_projection_matrix(P1_yaml)
-P2_matrix = load_projection_matrix(P2_yaml)
+P_right_matrix = load_projection_matrix(P_right_yaml)
+P_left_matrix = load_projection_matrix(P_left_yaml)
 
-print("Projection Matrix for Camera 1 (P1):\n", P1_matrix)
-print("Projection Matrix for Camera 2 (P2):\n", P2_matrix)
+print("Projection Matrix for right camera:\n", P_right_matrix)
+print("Projection Matrix for left camera:\n", P_left_matrix)
 
 # ---------------------------
 # 4. Triangulate the Detected Points
@@ -135,7 +133,7 @@ for color in points_cam1:
         pts2 = np.array([[pt2[0]], [pt2[1]]], dtype=np.float64)
 
         # Triangulate the 3D point.
-        point_4d = cv2.triangulatePoints(P1_matrix, P2_matrix, pts1, pts2)
+        point_4d = cv2.triangulatePoints(P_right_matrix, P_left_matrix, pts1, pts2)
         # Convert from homogeneous coordinates to 3D.
         point_3d = point_4d / point_4d[3]
         triangulated_points[color] = point_3d[:3].ravel()
@@ -159,7 +157,7 @@ plotter = pv.Plotter()
 # For each triangulated point, add a small sphere and a label.
 for color_name, point in triangulated_points.items():
     # Create a sphere centered at the triangulated point.
-    sphere = pv.Sphere(radius=1, center=point)
+    sphere = pv.Sphere(radius=0.01, center=point)
     # Add the sphere to the scene using the color name (e.g., "red", "green", etc.)
     plotter.add_mesh(sphere, color=color_name, specular=0.5)
     # Add a label near the point

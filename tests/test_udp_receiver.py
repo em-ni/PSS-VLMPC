@@ -13,7 +13,7 @@ print(f"Listening on {UDP_IP}:{UDP_PORT}")
 try:
     while True:
         data, addr = sock.recvfrom(1024)  # Adjust buffer size if necessary
-        
+        print(len(data))
         if len(data) == 4:  # Likely a single precision float or 32-bit integer
             try:
                 # Attempt to decode as a single precision float
@@ -29,12 +29,15 @@ try:
             except:
                 pass
 
-        elif len(data) == 8:  # Likely a double precision float or 64-bit integer
+        elif len(data) == 24:  # Likely a double precision float or 64-bit integer
             try:
                 # Attempt to decode as a double precision float 
-                value_double = struct.unpack('d', data)
-                print(f"Received double: {value_double[0]} from {addr}")
+                values_double = struct.unpack('ddd', data)
+                print(f"Received double: {values_double[0]} from {addr}")
+                print(f"Received double: {values_double[1]} from {addr}")
+                print(f"Received double: {values_double[2]} from {addr}")
             except:
+                print(f"Received unhandled data type: {data} from {addr}")
                 pass
 
         # Example of decoding a fixed-length string (adjust length as needed)

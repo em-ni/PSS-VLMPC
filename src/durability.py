@@ -2,17 +2,19 @@ import csv
 import os
 import socket
 import struct
+import threading
 import time
 import numpy as np
 from zaber_motion import Units
 from zaber_motion.ascii import Connection
 import cv2
 import src.config as config
+# import config as config
 
 class Durability:
     def __init__(self, save_dir, csv_path):
-        self.cam_1_index = config.cam_1_index
-        self.cam_2_index = config.cam_2_index
+        self.cam_left_index = config.cam_left_index
+        self.cam_right_index = config.cam_right_index
         self.save_dir = save_dir
         self.output_file = csv_path
         self.pressure_values = []
@@ -56,45 +58,23 @@ class Durability:
         sock.bind((config.UDP_IP, config.UDP_PORT))
 
         print(f"Listening on {config.UDP_IP}:{config.UDP_PORT}")
-        # TODO set pressure values here
-        # temp
-        pressure_values = [0, 0, 0]
-        self.set_pressure_values(pressure_values)
         try:
             while True:
                 data, addr = sock.recvfrom(1024)  # Adjust buffer size if necessary
-                
-                if len(data) == 4:  # Likely a single precision float or 32-bit integer
-                    try:
-                        # Attempt to decode as a single precision float
-                        value_float = struct.unpack('f', data)
-                        print(f"Received float: {value_float[0]} from {addr}")
-                    except:
-                        pass
-
-                    try:
-                        # Attempt to decode as a 32-bit integer
-                        value_int = struct.unpack('i', data)
-                        print(f"Received int: {value_int[0]} from {addr}")
-                    except:
-                        pass
-
-                elif len(data) == 8:  # Likely a double precision float or 64-bit integer
-                    try:
-                        # Attempt to decode as a double precision float 
-                        value_double = struct.unpack('d', data)
-                        print(f"Received double: {value_double[0]} from {addr}")
-                    except:
-                        pass
-
-                # Example of decoding a fixed-length string (adjust length as needed)
-                elif len(data) > 0:  # Assuming there's no fixed size, trying to interpret as a string
-                    try:
-                        # Decode as UTF-8 string, replace errors to avoid exceptions
-                        value_str = data.decode('utf-8', errors='replace')
-                        print(f"Received string: {value_str} from {addr}")
-                    except:
-                        print(f"Received unhandled data type: {data} from {addr}")
+                try:
+                    # Attempt to decode as a double precision float 
+                    values_double = struct.unpack('ddd', data)
+                    # print(f"Received double: {values_double[0]} from {addr}")
+                    # print(f"Received double: {values_double[1]} from {addr}")
+                    # print(f"Received double: {values_double[2]} from {addr}")
+                    cur_pressure_1 = values_double[0]
+                    cur_pressure_2 = values_double[1]
+                    cur_pressure_3 = values_double[2]
+                    cur_pressure_values = [cur_pressure_1, cur_pressure_2, cur_pressure_3]
+                    self.set_pressure_values(cur_pressure_values)
+                except:
+                    print(f"Received unhandled data type: {data} from {addr}")
+                    pass
 
         except KeyboardInterrupt:
             print("Stopping receiver.")
@@ -190,6 +170,10 @@ class Durability:
         connection.close()
 
     def run(self):
+        # Listen to the UDP connection in a separate thread
+        udp_thread = threading.Thread(target=self.listen_pressure_udp)
+        udp_thread.start()
+
         # Execute the movement
         self.move()
 
@@ -224,14 +208,14 @@ class Durability:
 
         # Take images from the cameras
         timestamp = time.time()
-        _, img1_path = self.get_image(self.cam_1_index, timestamp)
-        _, img2_path = self.get_image(self.cam_2_index, timestamp)
+        _, img1_path = self.get_image(self.cam_left_index, timestamp)
+        _, img2_path = self.get_image(self.cam_right_index, timestamp)
 
         # Save data
         self.save_data(volume_values, pressure_values, img1_path, img2_path, timestamp)
 
-# if __name__ == "__main__":
-#     save_dir = config.save_dir
-#     csv_path = config.csv_path
-#     durability = Durability(save_dir, csv_path)
-#     durability.run()
+if __name__ == "__main__":
+    save_dir = config.save_dir
+    csv_path = config.csv_path
+    durability = Durability(save_dir, csv_path)
+    durability.run()

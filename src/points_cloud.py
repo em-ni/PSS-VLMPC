@@ -11,7 +11,7 @@ class PointsCloud:
         pass
 
     def get_points_from_csv(self):
-        # csv file columns: timestamp - volume_1 - volume_2 - volume_3 - pressure_1 - pressure_2 - pressure_3 - img_1 - img_2 - tip_x - tip_y - tip_z - base_x - base_y - 
+        # csv file columns: timestamp - volume_1 - volume_2 - volume_3 - pressure_1 - pressure_2 - pressure_3 - img_left - img_right - tip_x - tip_y - tip_z - base_x - base_y - 
         # Base coordinates
         with open(self.csv_path, mode="r") as csvfile:
             reader = csv.DictReader(csvfile)  # Use DictReader to read the CSV
@@ -26,6 +26,11 @@ class PointsCloud:
                 tip_x = row['tip_x']
                 tip_y = row['tip_y']
                 tip_z = row['tip_z']
+
+                # Skip the row if any of the coordinates is missing
+                if base_x == "" or base_y == "" or base_z == "" or tip_x == "" or tip_y == "" or tip_z == "" or base_x == "nan" or base_y == "nan" or base_z == "nan" or tip_x == "nan" or tip_y == "nan" or tip_z == "nan":
+                    print("Skipping row with missing coordinates.")
+                    continue
 
                 # Compute the difference between the tip and base coordinates
                 diff_x = float(tip_x) - float(base_x)
@@ -66,7 +71,7 @@ class PointsCloud:
 
 
 if __name__ == "__main__":
-    csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-02-26_13-56-18\output_exp_2025-02-26_13-56-18.csv"
+    csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-02-27_12-16-06\output_exp_2025-02-27_12-16-06.csv"
     points_cloud = PointsCloud(csv_path)
     points_cloud.get_points_from_csv()
     points_cloud.plot_points()

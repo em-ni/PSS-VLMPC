@@ -5,10 +5,11 @@ import time
 import numpy as np
 
 # Cameras
-cam_1_index = 1
-cam_2_index = 0
-P1_yaml = os.path.abspath(os.path.join("calibration_images_cam4_640x480p", "projection_matrix.yaml"))
-P2_yaml = os.path.abspath(os.path.join("calibration_images_cam2_640x480p", "projection_matrix.yaml"))
+print("\n\nIMPORTANT: Check if the camera indexes are correct every time you run the code.\n\n")
+cam_left_index = 0
+cam_right_index = 1
+P_left_yaml = os.path.abspath(os.path.join("calibration_images_cam_left_640x480p", "projection_matrix.yaml"))
+P_right_yaml = os.path.abspath(os.path.join("calibration_images_cam_right_640x480p", "projection_matrix.yaml"))
 
 # Set experiment name and save directory
 today = time.strftime("%Y-%m-%d")
@@ -22,7 +23,7 @@ if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
 # Set the csv file columns
-csv_columns = ["timestamp", "volume_1", "volume_2", "volume_3", "pressure_1", "pressure_2", "pressure_3", "img_1", "img_2", "tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
+csv_columns = ["timestamp", "volume_1", "volume_2", "volume_3", "pressure_1", "pressure_2", "pressure_3", "img_left", "img_right", "tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
 with open(csv_path, mode="w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow(csv_columns)
@@ -39,10 +40,10 @@ lower_red2 = np.array([171, 55, 0])
 upper_red2 = np.array([180, 255, 255])
 
 # Move settings
-home_first = True
-offset = 0 
+home_first = False
+offset = 1 
 initial_pos = 110 + offset
-steps = 12
+steps = 9
 stroke = 3  # mm
 stepSize = stroke / steps
 
