@@ -43,7 +43,7 @@ upper_red2 = np.array([180, 255, 255])
 home_first = False
 offset = 1 
 initial_pos = 110 + offset
-steps = 9
+steps = 15
 stroke = 4  # mm
 stepSize = stroke / steps
 

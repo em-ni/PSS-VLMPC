@@ -6,8 +6,8 @@ import cv2
 import numpy as np
 import yaml
 import csv
-# import src.config as config
-import config as config
+import src.config as config
+# import config as config
 
 class Tracker:
     def __init__(self, experiment_name, save_dir, csv_path):

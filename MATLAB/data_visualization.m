@@ -30,10 +30,10 @@ pressures(:,2) = pressures(:,2)-pressures(1,2);
 pressures(:,3) = pressures(:,3)-pressures(1,3);
 
 % Extract the tip coordinates 
-tipCoords = [data.VarName17, data.VarName18, data.VarName19];
+tipCoords = [data.tip_x, data.tip_y, data.tip_z];
 
 % Extract the base coordinates 
-baseCoords = [data.VarName20, data.VarName21, data.VarName22];
+baseCoords = [data.base_x, data.base_y, data.base_z];
 
 % Calculate the difference between tip and base coordinates
 diffCoords = tipCoords - baseCoords;
