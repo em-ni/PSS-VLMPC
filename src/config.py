@@ -44,7 +44,7 @@ home_first = False
 offset = 1 
 initial_pos = 110 + offset
 steps = 9
-stroke = 3  # mm
+stroke = 4  # mm
 stepSize = stroke / steps
 
 # Configuration (UDP receiver) (data: pressure sensors -> quanser -> simulink -> python)

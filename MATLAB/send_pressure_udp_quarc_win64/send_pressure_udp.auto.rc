@@ -1,2 +1,0 @@
-#include <winuser.rh>
-1 RT_MANIFEST "send_pressure_udp.auto.manifest"
