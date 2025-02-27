@@ -7,6 +7,7 @@ import numpy as np
 import yaml
 import csv
 import src.config as config
+# import config as config
 
 class Tracker:
     def __init__(self, experiment_name, save_dir, csv_path):
@@ -110,13 +111,13 @@ class Tracker:
         rows = []
         # Get images from the csv file
         with open(self.csv_path, mode="r") as csvfile:
-            reader = csv.reader(csvfile)
+            reader = csv.DictReader(csvfile)  # Use DictReader to read the CSV
             next(reader)
             for row in reader:
                 
                 # Read 4th and 5th columns of the csv file
-                img1_rel_path = row[4]
-                img2_rel_path = row[5]
+                img1_rel_path = row['img_1']
+                img2_rel_path = row['img_2']
 
                 # take everything between experiment_name and .png
                 img1_name = img1_rel_path[img1_rel_path.find(self.experiment_name)+len(self.experiment_name)+1:img1_rel_path.find(".png")+4]
@@ -149,18 +150,26 @@ class Tracker:
                 print("\rTip coordinates: {}   Base coordinates: {}".format(tip_3d.flatten(), base_3d.flatten()), end="", flush=True)
 
                 # Append the 3D coordinates to the csv file
-                # csv file columns: timestamp - volume_1 - volume_2 - volume_3 - tip_x - tip_y - tip_z - base_x - base_y - base_z
-                row.append(tip_3d[0][0])
-                row.append(tip_3d[1][0])
-                row.append(tip_3d[2][0])
-                row.append(base_3d[0][0])
-                row.append(base_3d[1][0])
-                row.append(base_3d[2][0])
-                rows.append(row)
+                # csv file columns: timestamp - volume_1 - volume_2 - volume_3 - pressure_1 - pressure_2 - pressure_3 - tip_x - tip_y - tip_z - base_x - base_y - base_z
+                # Create a list from the dictionary
+                row_list = list(row.values())
+
+                # Append the new 3D coordinates
+                row_list.append(tip_3d[0][0])
+                row_list.append(tip_3d[1][0])
+                row_list.append(tip_3d[2][0])
+                row_list.append(base_3d[0][0])
+                row_list.append(base_3d[1][0])
+                row_list.append(base_3d[2][0])
+
+                # Add this row to the list of rows
+                rows.append(row_list)
+
 
         # Write the updated rows back to the CSV file (or to a new file)
         with open(self.csv_path, mode="w", newline="") as csvfile:
             writer = csv.writer(csvfile)
+            writer.writerow(config.csv_columns)
             writer.writerows(rows)
 
     def triangulate(self, img1, img2):
@@ -185,12 +194,12 @@ class Tracker:
 
         return tip_3d, base_3d
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
 
-#     # Experiment name
-#     experiment_name = "exp_2025-02-25_16-13-52"
-#     save_dir = os.path.join(".", "data", experiment_name)
-#     output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
+    # Experiment name
+    experiment_name = "exp_2025-02-26_13-56-18"
+    save_dir = os.path.join(".", "data", experiment_name)
+    output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
 
-#     tracker = Tracker(experiment_name, save_dir, output_file)
-#     tracker.run()
+    tracker = Tracker(experiment_name, save_dir, output_file)
+    tracker.run()

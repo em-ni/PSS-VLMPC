@@ -22,7 +22,7 @@ if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
 # Set the csv file columns
-csv_columns = ["timestamp", "volume_1", "volume_2", "volume_3", "img_1", "img_2", "tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
+csv_columns = ["timestamp", "volume_1", "volume_2", "volume_3", "pressure_1", "pressure_2", "pressure_3", "img_1", "img_2", "tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
 with open(csv_path, mode="w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow(csv_columns)
@@ -45,4 +45,8 @@ initial_pos = 110 + offset
 steps = 12
 stroke = 3  # mm
 stepSize = stroke / steps
+
+# Configuration (UDP receiver) (data: pressure sensors -> quanser -> simulink -> python)
+UDP_IP = "127.0.0.1"
+UDP_PORT = 25000
 

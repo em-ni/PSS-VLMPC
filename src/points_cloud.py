@@ -11,21 +11,21 @@ class PointsCloud:
         pass
 
     def get_points_from_csv(self):
-        # csv file columns: timestamp - volume_1 - volume_2 - volume_3 - img_1 - img_2 - tip_x - tip_y - tip_z - base_x - base_y - 
+        # csv file columns: timestamp - volume_1 - volume_2 - volume_3 - pressure_1 - pressure_2 - pressure_3 - img_1 - img_2 - tip_x - tip_y - tip_z - base_x - base_y - 
         # Base coordinates
         with open(self.csv_path, mode="r") as csvfile:
-            reader = csv.reader(csvfile)
-            next(reader)
+            reader = csv.DictReader(csvfile)  # Use DictReader to read the CSV
+            next(reader)  # Skip the header
             for row in reader:
                 # Get the base coordinates
-                base_x = row[9]
-                base_y = row[10]
-                base_z = row[11]
+                base_x = row['base_x']
+                base_y = row['base_y']
+                base_z = row['base_z']
 
                 # Get the tip coordinates
-                tip_x = row[6]
-                tip_y = row[7]
-                tip_z = row[8]
+                tip_x = row['tip_x']
+                tip_y = row['tip_y']
+                tip_z = row['tip_z']
 
                 # Compute the difference between the tip and base coordinates
                 diff_x = float(tip_x) - float(base_x)

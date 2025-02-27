@@ -1,5 +1,7 @@
 import csv
 import os
+import socket
+import struct
 import time
 import numpy as np
 from zaber_motion import Units
@@ -13,7 +15,8 @@ class Durability:
         self.cam_2_index = config.cam_2_index
         self.save_dir = save_dir
         self.output_file = csv_path
-        pass
+        self.pressure_values = []
+        return 
 
     def get_image(self, cam_index, timestamp):
         """
@@ -45,6 +48,58 @@ class Durability:
 
         return frame, photo_path
 
+    def get_pressure_values(self):
+        return self.pressure_values
+
+    def listen_pressure_udp(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((config.UDP_IP, config.UDP_PORT))
+
+        print(f"Listening on {config.UDP_IP}:{config.UDP_PORT}")
+        # TODO set pressure values here
+        # temp
+        pressure_values = [0, 0, 0]
+        self.set_pressure_values(pressure_values)
+        try:
+            while True:
+                data, addr = sock.recvfrom(1024)  # Adjust buffer size if necessary
+                
+                if len(data) == 4:  # Likely a single precision float or 32-bit integer
+                    try:
+                        # Attempt to decode as a single precision float
+                        value_float = struct.unpack('f', data)
+                        print(f"Received float: {value_float[0]} from {addr}")
+                    except:
+                        pass
+
+                    try:
+                        # Attempt to decode as a 32-bit integer
+                        value_int = struct.unpack('i', data)
+                        print(f"Received int: {value_int[0]} from {addr}")
+                    except:
+                        pass
+
+                elif len(data) == 8:  # Likely a double precision float or 64-bit integer
+                    try:
+                        # Attempt to decode as a double precision float 
+                        value_double = struct.unpack('d', data)
+                        print(f"Received double: {value_double[0]} from {addr}")
+                    except:
+                        pass
+
+                # Example of decoding a fixed-length string (adjust length as needed)
+                elif len(data) > 0:  # Assuming there's no fixed size, trying to interpret as a string
+                    try:
+                        # Decode as UTF-8 string, replace errors to avoid exceptions
+                        value_str = data.decode('utf-8', errors='replace')
+                        print(f"Received string: {value_str} from {addr}")
+                    except:
+                        print(f"Received unhandled data type: {data} from {addr}")
+
+        except KeyboardInterrupt:
+            print("Stopping receiver.")
+            sock.close()
+            
     def move(self):
         # Open connection on COM3
         connection = Connection.open_serial_port('COM3')
@@ -57,20 +112,20 @@ class Durability:
             print(device_list)
             
             # Get the axis
-            axis_1 = device_list[0].get_axis(1)
-            axis_2 = device_list[1].get_axis(1)
-            axis_3 = device_list[2].get_axis(1)
+            self.axis_1 = device_list[0].get_axis(1)
+            self.axis_2 = device_list[1].get_axis(1)
+            self.axis_3 = device_list[2].get_axis(1)
             
             # Home each axis if home_first is True
             if config.home_first: 
-                axis_1.home()
-                axis_2.home()
-                axis_3.home()
+                self.axis_1.home()
+                self.axis_2.home()
+                self.axis_3.home()
 
             # Move each axis to the minimum position
-            axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             time.sleep(1)
             
             userInput = input("Enter 2 to continue:\n")
@@ -93,65 +148,19 @@ class Durability:
                             if k == 0 and k_flipFlag == -1:
                                 k_flipFlag = -k_flipFlag
                                 print(i, j, k)
-                                axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
-                                axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
-                                axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
-                                time.sleep(0.2)
-
-                                # Volume values
-                                volume_values = [position_i, position_j, position_k]
-
-                                # Take images from the cameras
-                                timestamp = time.time()
-                                _, img1_path = self.get_image(self.cam_1_index, timestamp)
-                                _, img2_path = self.get_image(self.cam_2_index, timestamp)
-
-                                # Save data
-                                self.save_data(volume_values, img1_path, img2_path, timestamp)
-                                
+                                self.step_and_save(position_i, position_j, position_k)
                                 position_k = config.initial_pos + k * config.stepSize
                                 stepCounter += 1
                                 break
                             if k == config.steps and k_flipFlag == 1:
                                 k_flipFlag = -k_flipFlag
                                 print(i, j, k)
-                                axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
-                                axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
-                                axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
-                                time.sleep(0.2)
-
-                                # Volume values
-                                volume_values = [position_i, position_j, position_k]
-
-                                # Take images from the cameras
-                                timestamp = time.time()
-                                _, img1_path = self.get_image(self.cam_1_index, timestamp)
-                                _, img2_path = self.get_image(self.cam_2_index, timestamp)
-
-                                # Save data
-                                self.save_data(volume_values, img1_path, img2_path, timestamp)
-
+                                self.step_and_save(position_i, position_j, position_k)
                                 position_k = config.initial_pos + k * config.stepSize
                                 stepCounter += 1
                                 break
-
                             print(i, j, k)
-                            axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
-                            axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
-                            axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
-                            time.sleep(0.2)
-
-                            # Volume values
-                            volume_values = [position_i, position_j, position_k]
-
-                            # Take images from the cameras
-                            timestamp = time.time()
-                            _, img1_path = self.get_image(self.cam_1_index, timestamp)
-                            _, img2_path = self.get_image(self.cam_2_index, timestamp)
-
-                            # Save data
-                            self.save_data(volume_values, img1_path, img2_path, timestamp)
-                            
+                            self.step_and_save(position_i, position_j, position_k)  
                             position_k = config.initial_pos + k * config.stepSize
                             k = k + k_flipFlag
                             stepCounter += 1
@@ -168,9 +177,9 @@ class Durability:
                     position_i = config.initial_pos + i * config.stepSize
                     i = i + 1
             
-            axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             time.sleep(0.2)
             print("Finished")
             
@@ -184,25 +193,42 @@ class Durability:
         # Execute the movement
         self.move()
 
-    def save_data(self, volume_values, frame_1_name, frame_2_name, timestamp):
+    def save_data(self, volume_values, pressure_values, frame_1_name, frame_2_name, timestamp):
         """
         Save data in a csv with columns:
         timestamp - volume_1 - volume_2 - volume_3 - frame_1 - frame_2 - tip_x - tip_y - tip_z - base_x - base_y - base_z
         """
-        header = (
-            ["timestamp"]
-            + [f"volume_{i+1}" for i in range(len(volume_values))]
-            + ["frame_1", "frame_2"]
-        )
-        file_exists = os.path.isfile(self.output_file)
-
+        # Not checking if file exists since it should be created in config.py
         with open(self.output_file, mode="a", newline="") as csvfile:
             writer = csv.writer(csvfile)
-            if not file_exists:
-                writer.writerow(header)
+            writer.writerow([timestamp] + volume_values + pressure_values + [frame_1_name, frame_2_name])
 
-            writer.writerow([timestamp] + volume_values + [frame_1_name, frame_2_name])
+    def set_pressure_values(self, pressure_values):
+        self.pressure_values = pressure_values
 
+    def step_and_save(self, position_i, position_j, position_k):
+        """
+        Move the motors to the position and save the data
+        """
+        # Move the motors
+        self.axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
+        self.axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)
+        self.axis_3.move_absolute(position_k, Units.LENGTH_MILLIMETRES, True)
+
+        # Wait for the motors to move
+        time.sleep(0.2)
+
+        # Volume values
+        volume_values = [position_i, position_j, position_k]
+        pressure_values = self.get_pressure_values()
+
+        # Take images from the cameras
+        timestamp = time.time()
+        _, img1_path = self.get_image(self.cam_1_index, timestamp)
+        _, img2_path = self.get_image(self.cam_2_index, timestamp)
+
+        # Save data
+        self.save_data(volume_values, pressure_values, img1_path, img2_path, timestamp)
 
 # if __name__ == "__main__":
 #     save_dir = config.save_dir
