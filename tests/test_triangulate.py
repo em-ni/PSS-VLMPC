@@ -111,8 +111,8 @@ def load_projection_matrix(yaml_path):
 
 
 # File paths for the projection matrices.
-P_right_yaml = os.path.join("calibration_images_cam_right_640x480p", "projection_matrix.yaml")
-P_left_yaml = os.path.join("calibration_images_cam_left_640x480p", "projection_matrix.yaml")
+P_right_yaml = os.path.join("calibration", "calibration_images_cam_right_640x480p", "projection_matrix.yaml")
+P_left_yaml = os.path.join("calibration", "calibration_images_cam_left_640x480p", "projection_matrix.yaml")
 
 P_right_matrix = load_projection_matrix(P_right_yaml)
 P_left_matrix = load_projection_matrix(P_left_yaml)

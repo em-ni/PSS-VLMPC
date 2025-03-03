@@ -8,8 +8,8 @@ import numpy as np
 print("\n\nIMPORTANT: Check if the camera indexes are correct every time you run the code.\n\n")
 cam_left_index = 0
 cam_right_index = 1
-P_left_yaml = os.path.abspath(os.path.join("calibration_images_cam_left_640x480p", "projection_matrix.yaml"))
-P_right_yaml = os.path.abspath(os.path.join("calibration_images_cam_right_640x480p", "projection_matrix.yaml"))
+P_left_yaml = os.path.abspath(os.path.join("calibration", "calibration_images_cam_left_640x480p", "projection_matrix.yaml"))
+P_right_yaml = os.path.abspath(os.path.join("calibration", "calibration_images_cam_right_640x480p", "projection_matrix.yaml"))
 
 # Set experiment name and save directory
 today = time.strftime("%Y-%m-%d")
