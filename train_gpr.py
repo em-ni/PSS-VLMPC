@@ -9,10 +9,18 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import torch
 import gpytorch
+from gpytorch.kernels import MaternKernel, LinearKernel, ScaleKernel, MultitaskKernel
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-# Define a multitask GP model using GPyTorch
+# Use pressure_only flag to train a model only on pressure outputs
+pressure_only = True
+if pressure_only:
+    num_tasks = 3
+else:
+    num_tasks = 6
+
+# Define a multitask GP model using GPyTorch with a Matérn kernel
 class MultitaskGPModel(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood, num_tasks):
         super(MultitaskGPModel, self).__init__(train_x, train_y, likelihood)
@@ -20,9 +28,8 @@ class MultitaskGPModel(gpytorch.models.ExactGP):
         self.mean_module = gpytorch.means.MultitaskMean(
             gpytorch.means.ConstantMean(), num_tasks=num_tasks
         )
-        self.covar_module = gpytorch.kernels.MultitaskKernel(
-            gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=1
-        )
+        base_kernel = ScaleKernel(MaternKernel(nu=3/2) + LinearKernel())
+        self.covar_module = MultitaskKernel(base_kernel, num_tasks=num_tasks, rank=2)
     
     def forward(self, x):
         mean_x = self.mean_module(x)
@@ -50,8 +57,11 @@ def load_data(csv_path):
     
     # Input features: [dx, dy, dz]
     X = df[['dx', 'dy', 'dz']].values
-    # Outputs: volumes and pressures
-    y = df[['volume_1', 'volume_2', 'volume_3', 'pressure_1', 'pressure_2', 'pressure_3']].values
+    # Outputs: volumes and/or pressures
+    if pressure_only:
+        y = df[['pressure_1', 'pressure_2', 'pressure_3']].values
+    else:
+        y = df[['volume_1', 'volume_2', 'volume_3', 'pressure_1', 'pressure_2', 'pressure_3']].values
     
     return X, y
 
@@ -60,7 +70,7 @@ def main():
         description="Train multi-task GP model using GPyTorch for Soft Continuum Robot data"
     )
     parser.add_argument("--experiment_folder", type=str, required=True, help="Path to the data folder")
-    parser.add_argument("--test_size", type=float, default=0.2, help="Proportion of the dataset to use as test set")
+    parser.add_argument("--test_size", type=float, default=0.1, help="Proportion of the dataset to use as test set")
     parser.add_argument("--training_iterations", type=int, default=100, help="Number of training iterations")
     args = parser.parse_args()
     
@@ -91,9 +101,10 @@ def main():
     test_x = torch.tensor(X_test_scaled, dtype=torch.float32)
     test_y = torch.tensor(y_test_scaled, dtype=torch.float32)
     
-    num_tasks = train_y.shape[1]  # Should be 6 (3 volumes, 3 pressures)
+    # Number of tasks is defined by the output dimension
+    num_tasks = train_y.shape[1]
     
-    # Set up likelihood and model
+    # Set up likelihood and model with the modified kernel
     likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=num_tasks)
     model = MultitaskGPModel(train_x, train_y, likelihood, num_tasks=num_tasks)
     
@@ -104,15 +115,13 @@ def main():
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     
     loss_history = []
-    print("Training the multitask GP model using GPyTorch...")
+    print("Training the multitask GP model using GPyTorch with modified kernel...")
     for i in tqdm(range(args.training_iterations), desc="Training Iterations"):
         optimizer.zero_grad()
         output = model(train_x)
         loss = -mll(output, train_y)
         loss.backward()
         loss_history.append(loss.item())
-        if (i+1) % 10 == 0:
-            print(f"Iteration {i+1}/{args.training_iterations} - Loss: {loss.item():.3f}")
         optimizer.step()
     
     # Plot training loss
@@ -121,7 +130,7 @@ def main():
     plt.xlabel("Iteration")
     plt.ylabel("Negative Marginal Log Likelihood")
     plt.title("Training Loss")
-    loss_plot_path = os.path.join(args.experiment_folder, "training_loss.png")
+    loss_plot_path = os.path.join(args.experiment_folder, "training_loss_gpr.png")
     plt.savefig(loss_plot_path)
     plt.close()
     print(f"Training loss plot saved to {loss_plot_path}")
@@ -139,9 +148,15 @@ def main():
         print(f"Test Mean Squared Error: {mse:.4f}")
     
     # Create scatter plots for predicted vs. actual (original scale)
-    fig, axs = plt.subplots(2, 3, figsize=(15, 10))
-    axs = axs.flatten()
-    task_names = ["Volume 1", "Volume 2", "Volume 3", "Pressure 1", "Pressure 2", "Pressure 3"]
+    if num_tasks == 1:
+        fig, axs = plt.subplots(1, 1, figsize=(5, 5))
+        axs = [axs]
+    else:
+        fig, axs = plt.subplots(1, num_tasks, figsize=(5*num_tasks, 5))
+    if pressure_only:
+        task_names = ["Pressure 1", "Pressure 2", "Pressure 3"]
+    else:
+        task_names = ["Volume 1", "Volume 2", "Volume 3", "Pressure 1", "Pressure 2", "Pressure 3"]
     for i in range(num_tasks):
         axs[i].scatter(test_y_orig[:, i], pred_means[:, i], alpha=0.7)
         min_val = min(test_y_orig[:, i].min(), pred_means[:, i].min())
@@ -153,7 +168,7 @@ def main():
         axs[i].set_ylabel("Predicted")
         axs[i].set_title(task_names[i])
     plt.suptitle("Predicted vs Actual Values on Test Set")
-    scatter_plot_path = os.path.join(args.experiment_folder, "predicted_vs_actual.png")
+    scatter_plot_path = os.path.join(args.experiment_folder, "predicted_vs_actual_gpr.png")
     plt.savefig(scatter_plot_path)
     plt.close()
     print(f"Predicted vs Actual plot saved to {scatter_plot_path}")
@@ -163,7 +178,7 @@ def main():
     torch.save({
         "model_state_dict": model.state_dict(),
         "likelihood_state_dict": likelihood.state_dict(),
-        "scaler": input_scaler,
+        "input_scaler": input_scaler,
         "output_scaler": output_scaler,
     }, model_out)
     print(f"Trained model and scalers saved to {model_out}")
