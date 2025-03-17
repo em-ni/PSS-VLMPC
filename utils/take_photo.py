@@ -7,7 +7,9 @@ def take_photo(cam_index):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    cap = cv2.VideoCapture(cam_index)
+    # cap = cv2.VideoCapture(cam_index)
+    cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+
     if not cap.isOpened():
         print("Error: Cannot access the camera")
         return
@@ -27,5 +29,5 @@ def take_photo(cam_index):
 
 
 if __name__ == "__main__":
-    cam_index = 1
+    cam_index = 0
     take_photo(cam_index)

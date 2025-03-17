@@ -6,9 +6,11 @@ import time
 # camera_name = 'Misumi_200x200p'
 # camera_name = "Misumi_400x380p"
 # camera_name = "videoscope_1280x720p"
-# camera_name = "cam_right_640x480p"
-camera_name = "cam_left_640x480p"
-camera_index = 1  # IMPORTANT: check if it's correct every time you run the code
+camera_name = "camright_640x480p"
+# camera_name = "camleft_640x480p"
+camera_index = 2  # IMPORTANT: check if it's correct every time you run the code
+
+print("IMPORTANT: Check if the camera index is correct every time you run the code.")
 
 # Settings
 save_dir = "calibration_images_" + camera_name
@@ -34,7 +36,7 @@ else:
     print("Using live stream.")
 
 # Open the source
-cap = cv2.VideoCapture(camera_index)
+cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
 if not cap.isOpened():
     print("Error: Could not open source.")
     exit()

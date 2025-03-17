@@ -4,7 +4,7 @@ from zaber_motion import Units
 from zaber_motion.ascii import Connection
 
 home_first = False
-initial_pos = 110 + 2
+initial_pos = 110 + 5 
 
 # Open connection on COM3
 connection = Connection.open_serial_port('COM3')

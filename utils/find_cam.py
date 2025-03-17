@@ -2,8 +2,8 @@ import cv2
 import os
 
 # Test each video device
-for i in range(6):
-    cap = cv2.VideoCapture(i)
+for i in range(4):
+    cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
     if os.name == "nt":
         device_path = f"Video Device {i}"
     else:

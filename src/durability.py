@@ -29,7 +29,9 @@ class Durability:
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
-        cap = cv2.VideoCapture(cam_index)
+        # cap = cv2.VideoCapture(cam_index)
+        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+
         if not cap.isOpened():
             print("Error: Cannot access the camera")
             return
@@ -43,7 +45,7 @@ class Durability:
         photo_name = f"cam_{cam_index}_{timestamp}.png"
         photo_path = os.path.join(self.save_dir, photo_name)
         cv2.imwrite(photo_path, frame)
-        print(f"Photo saved at {photo_path}")
+        # print(f"Photo saved at {photo_path}")
 
         cap.release()
         cv2.destroyAllWindows()
@@ -127,19 +129,19 @@ class Durability:
                         while k <= config.steps:
                             if k == 0 and k_flipFlag == -1:
                                 k_flipFlag = -k_flipFlag
-                                print(i, j, k)
+                                print("\r", i, j, k, " ", end="", flush=True)
                                 self.step_and_save(position_i, position_j, position_k)
                                 position_k = config.initial_pos + k * config.stepSize
                                 stepCounter += 1
                                 break
                             if k == config.steps and k_flipFlag == 1:
                                 k_flipFlag = -k_flipFlag
-                                print(i, j, k)
+                                print("\r", i, j, k, " ", end="", flush=True)
                                 self.step_and_save(position_i, position_j, position_k)
                                 position_k = config.initial_pos + k * config.stepSize
                                 stepCounter += 1
                                 break
-                            print(i, j, k)
+                            print("\r", i, j, k, " ", end="", flush=True)
                             self.step_and_save(position_i, position_j, position_k)  
                             position_k = config.initial_pos + k * config.stepSize
                             k = k + k_flipFlag
@@ -161,7 +163,59 @@ class Durability:
             self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             time.sleep(0.2)
-            print("Finished")
+            print("Finished durability")
+            
+        except Exception as exception:
+            connection.close()
+            raise exception
+            
+        connection.close()
+
+    def move_from_csv(self):
+        # Open connection on COM3
+        connection = Connection.open_serial_port('COM3')
+        connection.enable_alerts()
+
+        try:
+            # connection.enableAlerts()  # (commented out as in MATLAB)
+            device_list = connection.detect_devices()
+            print("Found {} devices.".format(len(device_list)))
+            print(device_list)
+            
+            # Get the axis
+            self.axis_1 = device_list[0].get_axis(1)
+            self.axis_2 = device_list[1].get_axis(1)
+            self.axis_3 = device_list[2].get_axis(1)
+            
+            # Home each axis if home_first is True
+            if config.home_first: 
+                self.axis_1.home()
+                self.axis_2.home()
+                self.axis_3.home()
+
+            # Move each axis to the minimum position
+            self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            time.sleep(1)
+            
+            userInput = input("Enter 2 to continue:\n")
+            
+            if userInput == '2':
+                with open(config.input_volume_path, mode="r") as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    next(reader)  # Skip the header
+                    for row in reader:
+                        position_i = float(row['volume_1']) + config.initial_pos
+                        position_j = float(row['volume_2']) + config.initial_pos
+                        position_k = float(row['volume_3']) + config.initial_pos
+                        self.step_and_save(position_i, position_j, position_k)
+            
+            self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            time.sleep(0.2)
+            print("Finished durability")
             
         except Exception as exception:
             connection.close()
@@ -174,8 +228,16 @@ class Durability:
         udp_thread = threading.Thread(target=self.listen_pressure_udp)
         udp_thread.start()
 
-        # Execute the movement
-        self.move()
+        try:
+            # Execute the movement
+            # self.move()
+            self.move_from_csv()
+        except Exception as exception:
+            print("An error occurred, stopping the motors")
+            print(exception)
+            
+
+        # Probably I should join the thread here
 
     def save_data(self, volume_values, pressure_values, frame_1_name, frame_2_name, timestamp):
         """
@@ -194,6 +256,12 @@ class Durability:
         """
         Move the motors to the position and save the data
         """
+
+        # Skip if positions are above the maximum volume
+        if position_i > config.max_vol_1 or position_j > config.max_vol_2 or position_k > config.max_vol_3:
+            print("Position is above the maximum volume, skipping")
+            return
+
         # Move the motors
         self.axis_1.move_absolute(position_i, Units.LENGTH_MILLIMETRES, True)
         self.axis_2.move_absolute(position_j, Units.LENGTH_MILLIMETRES, True)

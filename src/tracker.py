@@ -25,6 +25,11 @@ class Tracker:
         self.P_left_matrix = self.load_projection_matrix(config.P_left_yaml)
         print("Projection Matrix for left camera:\n", self.P_left_matrix)
 
+        # Backup base positions
+        self.base_left_bck = None
+        self.base_right_bck = None
+
+
     def detect_tip(self, frame):
         """
         Input: frame - Image from the camera
@@ -37,16 +42,6 @@ class Tracker:
         mask_red1 = cv2.inRange(hsv, config.lower_red1, config.upper_red1)
         mask_red2 = cv2.inRange(hsv, config.lower_red2, config.upper_red2)
         mask_red = cv2.bitwise_or(mask_red1, mask_red2)
-
-        # # Define the size of the circular structuring element
-        # kernel_size = 7  # You can adjust the size as needed
-        # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-
-        # # Perform erosion (shrinking the white regions in the mask)
-        # mask_red = cv2.erode(mask_red, kernel, iterations=1)
-
-        # # Perform dilation (expanding the white regions in the mask)
-        # mask_red = cv2.dilate(mask_red, kernel, iterations=1)
 
         # Find contours in the mask.
         contours, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -62,22 +57,6 @@ class Tracker:
         cx = float(M["m10"] / M["m00"])
         cy = float(M["m01"] / M["m00"])
         return cx, cy
-
-        # # Get the red tip points
-        # red_tip = cv2.bitwise_and(frame, frame, mask=mask_red)
-        # red_tip_points = np.where(red_tip > 0)
-        # red_tip_points = np.column_stack((red_tip_points[1], red_tip_points[0]))
-
-        # if red_tip_points.size == 0:
-        #     return np.nan, np.nan
-
-        # # Get average of coorinates of point in red tip
-        # red_tip_x = red_tip_points[:, 0]
-        # red_tip_y = red_tip_points[:, 1]
-        # x_tip = np.mean(red_tip_x)
-        # y_tip = np.mean(red_tip_y)
-
-        # return x_tip, y_tip
 
     def detect_base(self, frame):
         """
@@ -103,26 +82,8 @@ class Tracker:
             return None
         cx = float(M["m10"] / M["m00"])
         cy = float(M["m01"] / M["m00"])
+
         return cx, cy
-        # # Get the yellow base points
-        # yellow_base = cv2.bitwise_and(frame, frame, mask=mask_yellow)
-        # yellow_base_gray = cv2.cvtColor(yellow_base, cv2.COLOR_BGR2GRAY)
-        # _, yellow_base_thresh = cv2.threshold(
-        #     yellow_base_gray, 127, 255, cv2.THRESH_BINARY
-        # )
-        # yellow_base_edges = cv2.Canny(yellow_base_thresh, 50, 150)
-        # yellow_base_points = np.where((yellow_base_edges > 0))
-        # yellow_base_points = np.column_stack(
-        #     (yellow_base_points[1], yellow_base_points[0])
-        # )
-
-        # # Get average coordinates of yellow base
-        # yellow_base_x = yellow_base_points[:, 0]
-        # yellow_base_y = yellow_base_points[:, 1]
-        # x_base = np.mean(yellow_base_x)
-        # y_base = np.mean(yellow_base_y)
-
-        # return x_base, y_base
 
     def get_image_from_csv(self, img_path):
         """
@@ -213,8 +174,6 @@ class Tracker:
             writer.writeheader()  # Write the header
             writer.writerows(all_rows)  # Write the updated rows
 
-
-
     def triangulate(self, img_left, img_right):
         """
         Input: img_left - Image from left camera
@@ -229,9 +188,20 @@ class Tracker:
         tip_right = self.detect_tip(img_right)
         base_right = self.detect_base(img_right)
 
+        # Backup the base positions
+        if base_left is not None:
+            self.base_left_bck = base_left
+        if base_right is not None:
+            self.base_right_bck = base_right
+        
         if tip_left is None or base_left is None or tip_right is None or base_right is None:
             print("Couldn't detect all points in both images.")
-            return None, None
+            if base_left is None and self.base_left_bck is not None:
+                print("Using the backup base position for the left camera.")
+                base_left = self.base_left_bck
+            if base_right is None and self.base_right_bck is not None:
+                print("Using the backup base position for the right camera.")
+                base_right = self.base_right_bck
 
         # Convert the points to the format required by triangulatePoints (2xN array)
         tip_left = np.array([[tip_left[0]], [tip_left[1]]], dtype=np.float32)  # (2, 1)

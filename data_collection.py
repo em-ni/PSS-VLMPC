@@ -15,10 +15,15 @@ if __name__ == "__main__":
     tracker = Tracker(experiment_name, save_dir, csv_path)
     points_cloud = PointsCloud(csv_path)
 
-    # Move the robot and save volumes and images
-    durability.run()
+    try:
+        # Move the robot and save volumes, pressures and images
+        durability.run()
 
-    # Triangulate the points to get 3d coordinates and plot the points cloud
-    tracker.run()
-    points_cloud.get_points_from_csv()
-    points_cloud.plot_points()
+        # Triangulate the points to get 3d coordinates and plot the points cloud
+        tracker.run()
+        points_cloud.get_points_from_csv()
+        points_cloud.plot_points()
+    except Exception as e:
+        print("An error occurred.")
+        print(e)
+        

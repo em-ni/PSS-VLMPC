@@ -5,9 +5,9 @@ clc
 close all
 %% Read the CSV file
 % Since the file does not contain header names, we read it without variable names.
-exp_name = "../data/exp_2025-02-27_17-47-52/";
+exp_name = "../data/exp_2025-03-11_12-01-39/";
 data = load(exp_name + "maintable.mat");
-data = data.outputexp20250227174752;
+data = data.outputexp20250311120139;
 
 % The CSV columns are assumed as follows:
 % Col1: Timestamp

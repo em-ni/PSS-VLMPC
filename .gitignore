@@ -7,3 +7,7 @@ Pressure.mat
 
 # Python files
 src/__pycache__/*
+
+# Data
+data/exp_2025-02*
+data/exp_2025-03*
