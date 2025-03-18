@@ -66,6 +66,6 @@ if pressure_only:
 else:
     output_dim = 6
 
-# Path to volume inputs (to be used in durability.move_from_csv)
+# Path to volume inputs (to be used in explorer.move_from_csv)
 input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
 

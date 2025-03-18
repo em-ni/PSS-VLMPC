@@ -11,7 +11,7 @@ import cv2
 import src.config as config
 # import config as config
 
-class Durability:
+class Explorer:
     def __init__(self, save_dir, csv_path):
         self.cam_left_index = config.cam_left_index
         self.cam_right_index = config.cam_right_index
@@ -163,7 +163,7 @@ class Durability:
             self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             time.sleep(0.2)
-            print("Finished durability")
+            print("Finished explorer")
             
         except Exception as exception:
             connection.close()
@@ -215,7 +215,7 @@ class Durability:
             self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
             time.sleep(0.2)
-            print("Finished durability")
+            print("Finished explorer")
             
         except Exception as exception:
             connection.close()
@@ -285,5 +285,5 @@ class Durability:
 if __name__ == "__main__":
     save_dir = config.save_dir
     csv_path = config.csv_path
-    durability = Durability(save_dir, csv_path)
-    durability.run()
+    explorer = Explorer(save_dir, csv_path)
+    explorer.run()

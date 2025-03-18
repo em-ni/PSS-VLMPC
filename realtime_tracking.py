@@ -46,6 +46,7 @@ if __name__ == "__main__":
     ax.set_ylim(-5, 5)
     ax.set_zlim(-5, 5)
     ax.set_title("3D Real-Time Tracking")
+    ax.view_init(elev=-90, azim=-180, roll=0)
 
     # Create empty scatter plots for the base (yellow) and tip (red).
     base_scatter = ax.scatter([], [], [], s=10, c="yellow")
