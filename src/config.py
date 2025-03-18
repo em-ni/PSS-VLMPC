@@ -50,9 +50,10 @@ initial_pos = 110 + offset
 steps = 10
 stroke = 4  # mm
 stepSize = stroke / steps
-max_vol_1 = initial_pos + 10
-max_vol_2 = initial_pos + 10
-max_vol_3 = initial_pos + 10
+max_stroke = 4
+max_vol_1 = initial_pos + max_stroke
+max_vol_2 = initial_pos + max_stroke
+max_vol_3 = initial_pos + max_stroke
 
 # Configuration (UDP receiver) (data: pressure sensors -> quanser -> simulink -> python)
 UDP_IP = "127.0.0.1"

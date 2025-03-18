@@ -21,9 +21,9 @@ class Tracker:
 
         # Load the projection matrices
         self.P_right_matrix = self.load_projection_matrix(config.P_right_yaml)
-        print("Projection Matrix for right camera:\n", self.P_right_matrix)
+        # print("Projection Matrix for right camera:\n", self.P_right_matrix)
         self.P_left_matrix = self.load_projection_matrix(config.P_left_yaml)
-        print("Projection Matrix for left camera:\n", self.P_left_matrix)
+        # print("Projection Matrix for left camera:\n", self.P_left_matrix)
 
         # Backup base positions
         self.base_left_bck = None
@@ -148,7 +148,7 @@ class Tracker:
             end = time.time()
             tracking_time = end - start
             
-            print("\rTracking time: {}".format(tracking_time), end="", flush=True)
+            # print("\rTracking time: {}".format(tracking_time), end="", flush=True)
 
             # Set the current tip and base positions
             self.cur_tip_3d = tip_3d
