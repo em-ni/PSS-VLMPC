@@ -29,6 +29,13 @@ class Tracker:
         self.base_left_bck = None
         self.base_right_bck = None
 
+        # Camera indices
+        self.cam_left_index = config.cam_left_index
+        self.cam_right_index = config.cam_right_index
+
+        # Current tip and base positions
+        self.cur_base_3d = None
+        self.cur_tip_3d = None
 
     def detect_tip(self, frame):
         """
@@ -85,6 +92,12 @@ class Tracker:
 
         return cx, cy
 
+    def get_current_tip(self):
+        return self.cur_tip_3d
+    
+    def get_current_base(self):
+        return self.cur_base_3d
+
     def get_image_from_csv(self, img_path):
         """
         Input: row - Row of the csv file
@@ -103,6 +116,56 @@ class Tracker:
             data = yaml.safe_load(f)
         P = np.array(data["projection_matrix"], dtype=np.float64)
         return P
+    
+    def real_time_tracking(self):
+        """
+        Function to track the robot in real-time
+        """
+        # Initialize the camera
+        cap_left = cv2.VideoCapture(self.cam_left_index, cv2.CAP_DSHOW)
+        cap_right = cv2.VideoCapture(self.cam_right_index, cv2.CAP_DSHOW)
+
+        if not cap_left.isOpened() or not cap_right.isOpened():
+            print("Error: Couldn't open the cameras.")
+            return
+
+        while True:
+            # Start the timer
+            start = time.time()
+
+            # Read the frames from the cameras
+            ret_left, frame_left = cap_left.read()
+            ret_right, frame_right = cap_right.read()
+
+            if not ret_left or not ret_right:
+                print("Error: Couldn't read the frames.")
+                break
+
+            # Triangulate the points
+            tip_3d, base_3d = self.triangulate(frame_left, frame_right)
+            if tip_3d is None or base_3d is None:
+                continue
+            end = time.time()
+            tracking_time = end - start
+            
+            print("\rTracking time: {}".format(tracking_time), end="", flush=True)
+
+            # Set the current tip and base positions
+            self.cur_tip_3d = tip_3d
+            self.cur_base_3d = base_3d
+
+            # # Display the frames
+            # cv2.imshow("Left Camera", frame_left)
+            # cv2.imshow("Right Camera", frame_right)
+
+            # Break the loop if 'q' is pressed
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        # Release the cameras
+        cap_left.release()
+        cap_right.release()
+        cv2.destroyAllWindows()
 
     def run(self):
         """
