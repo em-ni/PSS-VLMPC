@@ -3,7 +3,8 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.utils.env_checker import check_env
-from stable_baselines3 import PPO
+from stable_baselines3 import A2C, PPO
+import torch
 from src.tracker import Tracker
 import src.config as config
 from zaber_motion import Units
@@ -12,6 +13,7 @@ import threading
 import time
 import signal
 import sys
+from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy, BasePolicy, MultiInputActorCriticPolicy
 
 # Robot API for real-time interaction.
 class RealRobotAPI:
@@ -113,25 +115,32 @@ class RobotEnv(gym.Env):
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
         
         self.tip = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-        self.goal = np.array([2.5, -1.1, 0.0], dtype=np.float32)
+        self.goal = np.array([3.5, -1.1, 0.0], dtype=np.float32)
         self.max_steps = 200
         self.current_step = 0
-
+    
         self.robot_api = RealRobotAPI()
 
     def step(self, action):
         self.robot_api.send_command(action)
         self.tip = self.robot_api.get_current_tip()
         distance = np.linalg.norm(self.tip - self.goal)
-        reward = -distance
         terminated = False
         self.current_step += 1
-        if distance < 1:
+        distance_threshold = 2
+        if distance > distance_threshold:
             terminated = True
         # print(f"Step {self.current_step}: Terminated {terminated} Distance {distance} ", end="\r", flush=True)
         print(f"Step {self.current_step}: Terminated {terminated} Distance {distance} ")
         truncated = self.current_step >= self.max_steps  # episode timeout
         info = {}
+        if not terminated:
+            if distance < 0.3:
+                reward = 1
+            else:
+                reward = (1/(distance_threshold-0.3))*distance
+        else:
+            reward = 0
         return self.tip, reward, terminated, truncated, info
     
     def reset(self, *, seed=None, options=None):
@@ -144,6 +153,50 @@ class RobotEnv(gym.Env):
 
     def render(self, mode='human'):
         pass
+
+
+class CustomPolicy(ActorCriticPolicy):
+    """
+    Custom policy that loads pre-trained weights for the feature extractor.
+    Can be used with PPO or other actor-critic algorithms.
+    """
+    def __init__(self, 
+                 observation_space, 
+                 action_space, 
+                 lr_schedule, 
+                 pretrained_weights_path="data/exp_2025-03-17_15-26-06/nn_model.pth",
+                 *args, 
+                 **kwargs):
+        # Initialize the parent class first
+        super(CustomPolicy, self).__init__(
+            observation_space,
+            action_space,
+            lr_schedule,
+            *args,
+            **kwargs
+        )
+        
+        # Load pre-trained weights
+        print(f"Loading pre-trained weights from {pretrained_weights_path}")
+        try:
+            pretrained_weights = torch.load(pretrained_weights_path)
+            
+            # Load weights into the mlp_extractor
+            # Note: This assumes the architecture is compatible
+            # You might need to adapt this depending on your model structure
+            self.mlp_extractor.load_state_dict(pretrained_weights)
+            
+            print("Pre-trained weights loaded successfully")
+        except Exception as e:
+            print(f"Failed to load pre-trained weights: {e}")
+            
+    def _build_mlp_extractor(self) -> None:
+        """
+        Override this method if you need a custom feature extractor
+        architecture that's different from the default.
+        """
+        super()._build_mlp_extractor()
+        # You can modify the mlp_extractor here if needed
 
 
 import matplotlib.pyplot as plt
@@ -168,50 +221,17 @@ if __name__ == '__main__':
     # Function to run RL training and evaluation.
     def run_rl(env=env, reward_threshold=-0.5, success_rate=0.9, patience=10):
         # Initialize the model
-        model = PPO('MlpPolicy', env, verbose=1)
-        
-        # Train the model (this handles all the episodes internally)
-        print("Starting training...")
-        model.learn(total_timesteps=5)  # Adjust timesteps as needed
-        print("Training complete")
-        
-        # Save the trained model
-        model.save("ppo_robot_model")
-        
-        # Evaluate the trained model
-        print("\nEvaluating trained policy...")
-        recent_rewards = []
-        success_count = 0
-        eval_episodes = 2
-        
-        for episode in range(eval_episodes):
-            obs, _ = env.reset()
-            total_reward = 0
-            done = False
-            
-            while not done:
-                # Use deterministic=True for evaluation
-                action, _ = model.predict(obs, deterministic=True)
-                obs, reward, terminated, truncated, _ = env.step(action)
-                total_reward += reward
-                done = terminated or truncated
-                
-            recent_rewards.append(total_reward)
-            if terminated:  # If we reached the goal
-                success_count += 1
-                
-            print(f"Eval episode {episode+1}: Total reward = {total_reward:.2f}, Success = {terminated}")
-        
-        # Calculate statistics
-        avg_reward = np.mean(recent_rewards)
-        success_ratio = success_count / eval_episodes
-        
-        print(f"\nEvaluation results:")
-        print(f"Average reward: {avg_reward:.2f}")
-        print(f"Success rate: {success_ratio:.2f}")
-        
+        # model = PPO('MlpPolicy', env, verbose=1)
+        # model = A2C("MlpPolicy", env, verbose=1)
+        model = A2C(CustomPolicy, env, verbose=1)
+        model.learn(total_timesteps=200)
+        vec_env = model.get_env()
+        obs = vec_env.reset()
+        for i in range(100):
+            action, _state = model.predict(obs, deterministic=True)
+            obs, reward, done, info = vec_env.step(action)
+            vec_env.render("human")
         return model
-
 
     # Start the RL training and evaluation in a separate thread.
     rl_thread = threading.Thread(target=run_rl, args=(env,))
@@ -232,16 +252,18 @@ if __name__ == '__main__':
 
     # Create empty scatter plots for the base (yellow) and tip difference (red).
     base_scatter = ax.scatter([], [], [], s=10, c="yellow")
-    tip_scatter = ax.scatter([], [], [], s=10, c="red")
-    goal_scatter = ax.scatter([2.5], [-1.1], [0], s=10, c="green")
-
+    tip_scatter = ax.scatter([], [], [], s=30, c="red")
+    goal_scatter = ax.scatter([3.5], [-1.1], [0], s=10, c="green")
+    
     # Animation update function.
     def animate(frame, plot_tracker=env.robot_api.get_tracker()):
         base = plot_tracker.get_current_base()
         tip = plot_tracker.get_current_tip()
+        # body = plot_tracker.get_current_body()
         
         base_x, base_y, base_z = [], [], []
         tip_x, tip_y, tip_z = [], [], []
+        # body_x, body_y, body_z = [], [], []
         
         if base is not None:
             base = base.ravel()
@@ -253,6 +275,11 @@ if __name__ == '__main__':
             tip_x = [tip[0]]
             tip_y = [tip[1]]
             tip_z = [tip[2]]
+        # if body is not None:
+        #     body = body.ravel()
+        #     body_x = [body[0]]
+        #     body_y = [body[1]]
+        #     body_z = [body[2]]
         
         if base_x and base_y and base_z and tip_x and tip_y and tip_z:
             dif_x = [tip_x[0] - base_x[0]]
@@ -264,6 +291,17 @@ if __name__ == '__main__':
         # Plot the base at the origin (yellow) and the tip difference (red).
         base_scatter._offsets3d = ([0], [0], [0])
         tip_scatter._offsets3d = (dif_x, dif_y, dif_z)
+
+        # # Clear previous circle line if it exists
+        # for line in ax.get_lines():
+        #     line.remove()
+        
+        # # Draw circle if we have all three points
+        # if base is not None and tip is not None and body is not None:
+        #     circle_points = calculate_circle_through_points(base, tip, body)
+        #     if len(circle_points) > 1:
+        #         ax.plot(circle_points[:, 0], circle_points[:, 1], circle_points[:, 2], 'b-', linewidth=1)
+
         return base_scatter, tip_scatter
 
     # Create the animation. Adjust the interval as needed.
