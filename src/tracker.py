@@ -37,6 +37,12 @@ class Tracker:
         self.cur_base_3d = None
         self.cur_tip_3d = None
 
+        # Current body position
+        self.cur_body_3d = None
+        self.alpha = 0.2  # Smoothing factor (0.0-1.0) - lower means more smoothing
+        self.filtered_body_3d = None  # Initialize filtered coordinates
+        
+    # These three could be a single function...
     def detect_tip(self, frame):
         """
         Input: frame - Image from the camera
@@ -91,12 +97,53 @@ class Tracker:
         cy = float(M["m01"] / M["m00"])
 
         return cx, cy
+    
+    def detect_body(self, frame):
+        """
+        Input: frame - Image from the camera
+        Output: x,y - Average coordinates of the body of the robot
+        """
+        # Transform the image to hsv
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # Make mask for green color
+        mask_blue = cv2.inRange(hsv, config.lower_blue, config.upper_blue)
+        
+        # Find contours in the mask.
+        contours, _ = cv2.findContours(mask_blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(contours) == 0:
+            print("No green body detected.")
+            return None
+        
+        # Choose the largest contour.
+        c = max(contours, key=cv2.contourArea)
+        M = cv2.moments(c)
+        if M["m00"] == 0:
+            return None
+        cx = float(M["m10"] / M["m00"])
+        cy = float(M["m01"] / M["m00"])
+
+        return cx, cy
+
+    def filter_coordinates(self, new_coords):
+        """Apply exponential moving average filter to smooth coordinates"""
+        if self.filtered_body_3d is None:
+            # First measurement - initialize filter
+            self.filtered_body_3d = new_coords
+        else:
+            # Apply EMA filter
+            self.filtered_body_3d = self.alpha * new_coords + (1 - self.alpha) * self.filtered_body_3d
+        
+        return self.filtered_body_3d
 
     def get_current_tip(self):
         return self.cur_tip_3d
     
     def get_current_base(self):
         return self.cur_base_3d
+    
+    def get_current_body(self):
+        return self.filtered_body_3d
 
     def get_image_from_csv(self, img_path):
         """
@@ -250,6 +297,8 @@ class Tracker:
         base_left = self.detect_base(img_left)
         tip_right = self.detect_tip(img_right)
         base_right = self.detect_base(img_right)
+        body_left = self.detect_body(img_left)
+        body_right = self.detect_body(img_right)
 
         # Backup the base positions
         if base_left is not None:
@@ -257,7 +306,7 @@ class Tracker:
         if base_right is not None:
             self.base_right_bck = base_right
         
-        if tip_left is None or base_left is None or tip_right is None or base_right is None:
+        if tip_left is None or base_left is None or tip_right is None or base_right is None or body_left is None or body_right is None:
             print("Couldn't detect all points in both images.")
             if base_left is None and self.base_left_bck is not None:
                 print("Using the backup base position for the left camera.")
@@ -271,14 +320,25 @@ class Tracker:
         base_left = np.array([[base_left[0]], [base_left[1]]], dtype=np.float32)  # (2, 1)
         tip_right = np.array([[tip_right[0]], [tip_right[1]]], dtype=np.float32)  # (2, 1)
         base_right = np.array([[base_right[0]], [base_right[1]]], dtype=np.float32)  # (2, 1)
+        body_left = np.array([[body_left[0]], [body_left[1]]], dtype=np.float32)
+        body_right = np.array([[body_right[0]], [body_right[1]]], dtype=np.float32)
 
         # Triangulate the points
         tip_4d = cv2.triangulatePoints(self.P_left_matrix, self.P_right_matrix, tip_left, tip_right)
         base_4d = cv2.triangulatePoints(self.P_left_matrix, self.P_right_matrix, base_left, base_right)
-
+        body_4d = cv2.triangulatePoints(self.P_left_matrix, self.P_right_matrix, body_left, body_right)
+                                        
         # Convert from homogeneous coordinates to 3D.
         tip_3d = tip_4d[:3] / tip_4d[3]
         base_3d = base_4d[:3] / base_4d[3]
+        body_3d = body_4d[:3] / body_4d[3]
+        
+        if body_3d is not None:
+            # Apply filtering to body coordinates
+            self.cur_body_3d = self.filter_coordinates(body_3d)
+        else:
+            print("Couldn't detect the body in both images.")
+
 
         return tip_3d, base_3d
 
