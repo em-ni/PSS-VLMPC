@@ -7,6 +7,8 @@ Pressure.mat
 
 # Python files
 src/__pycache__/*
+tests/__pycache__/*
+utils/__pycache__/*
 
 # Data
 data/exp_*/cam*

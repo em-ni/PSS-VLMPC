@@ -1,11 +1,8 @@
-import numpy as np
 from gymnasium.utils.env_checker import check_env
 from stable_baselines3 import A2C, PPO
 import threading
-import time
 import signal
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # needed for 3D projection
 import matplotlib.animation as animation
 from src.robot_env import RobotEnv
 from utils.circle_arc import calculate_circle_through_points
