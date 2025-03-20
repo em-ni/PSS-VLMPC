@@ -17,6 +17,7 @@ time_now = time.strftime("%H-%M-%S")
 experiment_name = "exp_" + today + "_" + time_now
 save_dir = os.path.abspath(os.path.join(".", "data", experiment_name))
 csv_path = os.path.abspath(os.path.join(save_dir, f"output_{experiment_name}.csv"))
+data_dir = os.path.abspath(os.path.join(".", "data"))
 
 # If they dont exist, create the directories and the csv file
 if not os.path.exists(save_dir):
@@ -73,4 +74,8 @@ else:
 
 # Path to volume inputs (to be used in explorer.move_from_csv)
 input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
+
+# RL goal
+pick_random_goal = True
+rl_goal = np.array([4.5, -1.1, 0.0], dtype=np.float32)
 

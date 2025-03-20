@@ -56,7 +56,8 @@ if __name__ == '__main__':
     # Create empty scatter plots for the base (yellow) and tip difference (red).
     base_scatter = ax.scatter([], [], [], s=40, c="yellow")
     tip_scatter = ax.scatter([], [], [], s=60, c="red")
-    goal_scatter = ax.scatter([4.5], [-1.1], [0], s=10, c="green")
+    goal_coordinates = env.get_goal()
+    goal_scatter = ax.scatter([goal_coordinates[0]], [goal_coordinates[1]], [goal_coordinates[2]], s=60, c="green")
     body_scatter = ax.scatter([], [], [], s=5, c="blue")
 
     # Animation update function.
