@@ -4,7 +4,12 @@ import threading
 import signal
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import os
+import signal
+import src.config as config
 from src.robot_env import RobotEnv
+from src.custom_policy import CustomPolicy
+from src.robot_train_monitor import RobotTrainingMonitor
 from utils.circle_arc import calculate_circle_through_points
 
 
@@ -22,18 +27,45 @@ if __name__ == '__main__':
     tracker_thread.start()
 
     # Function to run RL training and evaluation.
-    def run_rl(env=env, reward_threshold=-0.5, success_rate=0.9, patience=10):
+    def run_rl(env=env):
         # Initialize the model
         # model = PPO('MlpPolicy', env, verbose=1)
         model = A2C("MlpPolicy", env, verbose=1)
         # model = A2C(CustomPolicy, env, verbose=1)
-        model.learn(total_timesteps=500)
-        vec_env = model.get_env()
-        obs = vec_env.reset()
-        for i in range(100):
-            action, _state = model.predict(obs, deterministic=True)
-            obs, reward, done, info = vec_env.step(action)
-            vec_env.render("human")
+
+        # Create the metrics callback
+        metrics_callback = RobotTrainingMonitor()
+        
+        # Train with callback
+        model.learn(total_timesteps=10000, callback=metrics_callback)
+        print("\n--- Training complete. Starting evaluation ---")
+
+        # Evaluate after training (with the trained model)
+        obs, _ = env.reset()
+        total_reward = 0
+        eval_episodes = 5
+        
+        for i in range(eval_episodes):
+            episode_reward = 0
+            done = False
+            while not done:
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, _ = env.step(action)
+                episode_reward += reward
+                done = terminated or truncated
+                env.render()
+            
+            obs, _ = env.reset()
+            total_reward += episode_reward
+            
+            print(f"Eval episode {i+1}: Reward = {episode_reward:.4f}")
+        
+        print(f"\nEvaluation results:")
+        print(f"Average reward: {total_reward/eval_episodes:.4f}")
+
+        # Save the trained policy to a file.
+        model.save(os.path.join(config.data_dir, "trained_policy.zip"))
+        os.kill(os.getpid(), signal.SIGTERM)
         return model
 
     # Start the RL training and evaluation in a separate thread.
@@ -72,31 +104,21 @@ if __name__ == '__main__':
         
         if base is not None:
             base = base.ravel()
-            base_x = [base[0]]
-            base_y = [base[1]]
-            base_z = [base[2]]
+            base_x, base_y, base_z = [base[0]], [base[1]], [base[2]]
         if tip is not None:
             tip = tip.ravel()
-            tip_x = [tip[0]]
-            tip_y = [tip[1]]
-            tip_z = [tip[2]]
+            tip_x, tip_y, tip_z = [[x] for x in tip]
         if body is not None:
             body = body.ravel()
-            body_x = [body[0]]
-            body_y = [body[1]]
-            body_z = [body[2]]
+            body_x, body_y, body_z = [body[0]], [body[1]], [body[2]]
         
         if base_x and base_y and base_z and tip_x and tip_y and tip_z:
-            dif_x = [tip_x[0] - base_x[0]]
-            dif_y = [tip_y[0] - base_y[0]]
-            dif_z = [tip_z[0] - base_z[0]]
+            dif_x, dif_y, dif_z = [tip_x[0] - base_x[0]], [tip_y[0] - base_y[0]], [tip_z[0] - base_z[0]]
         else:
             dif_x, dif_y, dif_z = [], [], []
 
         if body_x and body_y and body_z:
-            body_dif_x = [body_x[0] - base_x[0]]
-            body_dif_y = [body_y[0] - base_y[0]]
-            body_dif_z = [body_z[0] - base_z[0]]
+            body_dif_x, body_dif_y, body_dif_z = [body_x[0]-base_x[0]], [body_y[0]-base_y[0]], [body_z[0]-base_z[0]]
         else:
             body_dif_x, body_dif_y, body_dif_z = [], [], []
 

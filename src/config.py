@@ -1,13 +1,14 @@
 import csv
 import os
 import time
-
 import numpy as np
+
+new_experiment = False
 
 # Cameras
 print("\n\nIMPORTANT: Check if the camera indexes are correct every time you run the code.\n\n")
 cam_left_index = 0
-cam_right_index = 2
+cam_right_index = 3
 P_left_yaml = os.path.abspath(os.path.join("calibration", "calibration_images_camleft_640x480p", "projection_matrix.yaml"))
 P_right_yaml = os.path.abspath(os.path.join("calibration", "calibration_images_camright_640x480p", "projection_matrix.yaml"))
 
@@ -19,15 +20,16 @@ save_dir = os.path.abspath(os.path.join(".", "data", experiment_name))
 csv_path = os.path.abspath(os.path.join(save_dir, f"output_{experiment_name}.csv"))
 data_dir = os.path.abspath(os.path.join(".", "data"))
 
-# If they dont exist, create the directories and the csv file
-if not os.path.exists(save_dir):
-    os.makedirs(save_dir)
+if new_experiment:
+    # If they dont exist, create the directories and the csv file
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
 
-# Set the csv file columns
-csv_columns = ["timestamp", "volume_1", "volume_2", "volume_3", "pressure_1", "pressure_2", "pressure_3", "img_left", "img_right", "tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
-with open(csv_path, mode="w", newline="") as csvfile:
-    writer = csv.writer(csvfile)
-    writer.writerow(csv_columns)
+    # Set the csv file columns
+    csv_columns = ["timestamp", "volume_1", "volume_2", "volume_3", "pressure_1", "pressure_2", "pressure_3", "img_left", "img_right", "tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
+    with open(csv_path, mode="w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(csv_columns)
 
 # Colors range for detection
 # Yellow
@@ -50,12 +52,12 @@ upper_blue = np.array([140, 255, 255])
 
 # Move settings
 home_first = False
-offset = 5
+offset = 10
 initial_pos = 110 + offset
 steps = 10
 stroke = 4  # mm
 stepSize = stroke / steps
-max_stroke = 8
+max_stroke = 10
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
 max_vol_3 = initial_pos + max_stroke
@@ -76,6 +78,6 @@ else:
 input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
 
 # RL goal
-pick_random_goal = True
+pick_random_goal = False
 rl_goal = np.array([4.5, -1.1, 0.0], dtype=np.float32)
 

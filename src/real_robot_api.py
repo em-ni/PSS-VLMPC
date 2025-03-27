@@ -1,12 +1,12 @@
 import time
 import numpy as np
-from src.tracker import Tracker
-import src.config as config
 from zaber_motion import Units
 from zaber_motion.ascii import Connection
 import threading
 import time
 import sys
+from src.tracker import Tracker
+import src.config as config
 import src.config as config
 
 # Robot API for real-time interaction.
@@ -48,10 +48,10 @@ class RealRobotAPI:
     
     def send_command(self, action):
         # Move each axis by the action vector
-        self.axis_1.move_absolute(config.initial_pos + float(action[0]), Units.LENGTH_MILLIMETRES, True)
-        self.axis_2.move_absolute(config.initial_pos + float(action[1]), Units.LENGTH_MILLIMETRES, True)
-        self.axis_3.move_absolute(config.initial_pos + float(action[2]), Units.LENGTH_MILLIMETRES, True)
-        time.sleep(0.1)
+        self.axis_1.move_absolute(config.initial_pos + float(action[0]), Units.LENGTH_MILLIMETRES, False)
+        self.axis_2.move_absolute(config.initial_pos + float(action[1]), Units.LENGTH_MILLIMETRES, False)
+        self.axis_3.move_absolute(config.initial_pos + float(action[2]), Units.LENGTH_MILLIMETRES, False)
+        time.sleep(1)
     
     def get_current_tip(self):
         tip = self.tracker.get_current_tip()

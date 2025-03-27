@@ -2,11 +2,10 @@ import os
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+import pandas as pd
 import src.config as config
-import math
 import src.config as config
 from src.real_robot_api import RealRobotAPI
-import pandas as pd
 
 
 class RobotEnv(gym.Env):
@@ -21,7 +20,7 @@ class RobotEnv(gym.Env):
     def __init__(self):
         super(RobotEnv, self).__init__()
         # Change action space to a discrete multi-dimensional space.
-        self.action_space = spaces.MultiDiscrete([config.max_stroke + 1] * 3)
+        self.action_space = spaces.MultiDiscrete([config.max_stroke + 1] * 4)
         # Observation space remains the same.
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
         
@@ -30,9 +29,8 @@ class RobotEnv(gym.Env):
             self.goal = self.pick_goal()
         else:
             self.goal = config.rl_goal
-        self.max_steps = 200
+        self.max_steps = 100
         self.current_step = 0
-        self.previous_distace = 0
         self.robot_api = RealRobotAPI()
 
     def get_goal(self):
@@ -66,28 +64,51 @@ class RobotEnv(gym.Env):
 
         print(f"Picked goal: {np.random.uniform(lower_bound, upper_bound).astype(np.float32)} within workspace bounds: {lower_bound} and {upper_bound}")
         return np.random.uniform(lower_bound, upper_bound).astype(np.float32)
+    
+    def set_goal(self, goal):
+        self.goal = goal
 
     def step(self, action):
-        self.robot_api.send_command(action)
+        # Extract the elongation component (4th action)
+        elongation = action[3]
+        
+        # Create a new command vector with the first 3 actions adjusted by elongation
+        command = np.zeros(3, dtype=np.float32)
+        for i in range(3):
+            # Combine each action with elongation, ensuring it stays within bounds
+            combined_action = min(action[i] + elongation, config.max_stroke)
+            command[i] = max(0, combined_action)  # Ensure non-negative
+        
+        # Send the modified command to the robot
+        self.robot_api.send_command(command)
         self.tip = self.robot_api.get_current_tip()
         distance = np.linalg.norm(self.tip - self.goal)
         terminated = False
         self.current_step += 1
-        distance_threshold = 5
+        distance_threshold = 4
         
         if distance > distance_threshold:
             terminated = True
-        # print(f"Step {self.current_step}: Terminated {terminated} Distance {distance} ", end="\r", flush=True)
-        print(f"Step {self.current_step}: Terminated {terminated} Distance {distance} ")
-        truncated = self.current_step >= self.max_steps  # episode timeout
-        info = {}
-        if not terminated:
-            reward = 1/10 * (math.exp(-2*distance+3))
-
-            # reward = (1/(distance_threshold-0.3))*distance
-        else:
             reward = 0
-        self.previous_distace = distance
+        print(f"Step {self.current_step}: Distance {distance} ")
+        truncated = self.current_step >= self.max_steps  # episode timeout
+        info = {"step": self.current_step, "distance": distance}
+        bonus = 0
+
+        # Check 3d points alignment with the goal
+        # Compute perpendicular distance from goal to the line defined by the origin and the tip.
+        dist_to_line = np.linalg.norm(np.cross(self.tip, self.goal)) / np.linalg.norm(self.tip)
+
+        # If the goal lies nearly on the line, add a bonus reward.
+        if dist_to_line < 0.8 and np.linalg.norm(self.goal) > np.linalg.norm(self.tip):
+            print("Bonus reward for elongation.")
+            bonus = (20*max(action))/((0.5)*(max(action) - min(action))+0.0001)
+
+        if not terminated:
+            # reward = 1/(distance*(self.current_step**2)) + bonus
+            # reward = 1/(0.5*distance+0.0001) + bonus
+            reward = 1/(0.5*distance+0.0001) 
+
         return self.tip, reward, terminated, truncated, info
     
     def reset(self, *, seed=None, options=None):
@@ -96,6 +117,12 @@ class RobotEnv(gym.Env):
         self.robot_api.reset_robot()
         self.tip = self.robot_api.get_current_tip()
         self.current_step = 0
+
+        if config.pick_random_goal:
+            # Change goal with 20% probability.
+            if np.random.random() < 0.2:
+                self.goal = self.pick_goal()
+                print(f"Setting new goal at {self.goal}")
         return self.tip, {}
 
     def render(self, mode='human'):
