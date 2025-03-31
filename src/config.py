@@ -52,12 +52,12 @@ upper_blue = np.array([140, 255, 255])
 
 # Move settings
 home_first = False
-offset = 10
+offset = 6
 initial_pos = 110 + offset
 steps = 10
 stroke = 4  # mm
 stepSize = stroke / steps
-max_stroke = 10
+max_stroke = 9
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
 max_vol_3 = initial_pos + max_stroke
@@ -79,5 +79,5 @@ input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "input
 
 # RL goal
 pick_random_goal = False
-rl_goal = np.array([4.5, -1.1, 0.0], dtype=np.float32)
+rl_goal = np.array([2.5, 1.7, 1.0], dtype=np.float32)
 

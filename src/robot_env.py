@@ -85,7 +85,7 @@ class RobotEnv(gym.Env):
         distance = np.linalg.norm(self.tip - self.goal)
         terminated = False
         self.current_step += 1
-        distance_threshold = 4
+        distance_threshold = 1.9
         
         if distance > distance_threshold:
             terminated = True
@@ -100,14 +100,13 @@ class RobotEnv(gym.Env):
         dist_to_line = np.linalg.norm(np.cross(self.tip, self.goal)) / np.linalg.norm(self.tip)
 
         # If the goal lies nearly on the line, add a bonus reward.
-        if dist_to_line < 0.8 and np.linalg.norm(self.goal) > np.linalg.norm(self.tip):
+        if dist_to_line < 0.7 and np.linalg.norm(self.goal) > np.linalg.norm(self.tip):
             print("Bonus reward for elongation.")
-            bonus = (20*max(action))/((0.5)*(max(action) - min(action))+0.0001)
+            bonus += 15
 
         if not terminated:
             # reward = 1/(distance*(self.current_step**2)) + bonus
-            # reward = 1/(0.5*distance+0.0001) + bonus
-            reward = 1/(0.5*distance+0.0001) 
+            reward = 1/(0.5*distance+0.0001) + bonus
 
         return self.tip, reward, terminated, truncated, info
     

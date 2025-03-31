@@ -11,9 +11,23 @@ from src.robot_env import RobotEnv
 from src.custom_policy import CustomPolicy
 from src.robot_train_monitor import RobotTrainingMonitor
 from utils.circle_arc import calculate_circle_through_points
+import argparse
+
 
 
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description="RL agent for real soft robot")
+    parser.add_argument("--mode", type=str, choices=["train", "test"], required=True, 
+                        help="Run in training or testing mode")
+    parser.add_argument("--model_path", type=str, 
+                        help="Path to the trained policy model (required for test mode)")
+    args = parser.parse_args()
+
+    # Validate that model_path is provided when mode is test
+    if args.mode == "test" and not args.model_path:
+        parser.error("--model_path is required when mode is test")
+
     # Create a real robot environment.
     env = RobotEnv()
     signal_handler = env.robot_api.get_signal_handler()
@@ -27,10 +41,10 @@ if __name__ == '__main__':
     tracker_thread.start()
 
     # Function to run RL training and evaluation.
-    def run_rl(env=env):
+    def train(env=env):
         # Initialize the model
         # model = PPO('MlpPolicy', env, verbose=1)
-        model = A2C("MlpPolicy", env, verbose=1)
+        model = A2C("MlpPolicy", env, learning_rate=0.0005, ent_coef=0.3, verbose=1)
         # model = A2C(CustomPolicy, env, verbose=1)
 
         # Create the metrics callback
@@ -67,11 +81,70 @@ if __name__ == '__main__':
         model.save(os.path.join(config.data_dir, "trained_policy.zip"))
         os.kill(os.getpid(), signal.SIGTERM)
         return model
+    
+    # Function to run RL testing.
+    def test(env):
+        """Load and test a pre-trained RL policy."""
+        # Load the trained policy
+        try:
+            model = A2C.load(args.model_path)
+            print("Loaded A2C policy")
+        except Exception as e:
+            print(f"Failed to load policy: {e}")
+            return
+        
+        # Run the policy in a continuous loop
+        episode_count = 0
+        
+        while True:
+            episode_count += 1
+            print(f"Starting episode {episode_count}")
+            
+            # Handle different reset return types
+            reset_result = env.reset()
+            if isinstance(reset_result, tuple):
+                obs = reset_result[0]
+            else:
+                obs = reset_result
+            
+            done = False
+            episode_reward = 0
+            step_count = 0
+            
+            while not done:
+                # Get action from policy
+                action, _ = model.predict(obs, deterministic=True)
+                
+                # Apply action to environment
+                step_result = env.step(action)
+                
+                # Handle different return types
+                if len(step_result) == 4:
+                    obs, reward, done, info = step_result
+                else:
+                    obs, reward, terminated, truncated, info = step_result
+                    done = terminated or truncated
+                
+                episode_reward += reward
+                step_count += 1
+                
+                # Break if episode takes too long
+                if step_count > 1000:
+                    print("Episode taking too long, resetting")
+                    break
+            
+            print(f"Episode {episode_count} finished with reward {episode_reward} after {step_count} steps")
 
-    # Start the RL training and evaluation in a separate thread.
-    rl_thread = threading.Thread(target=run_rl, args=(env,))
-    rl_thread.daemon = True
-    rl_thread.start()
+    if args.mode == "train":
+        # Start the RL training and evaluation in a separate thread.
+        rl_thread = threading.Thread(target=train, args=(env,))
+        rl_thread.daemon = True
+        rl_thread.start()
+    elif args.mode == "test":
+        # Start the RL testing in a separate thread.
+        rl_thread = threading.Thread(target=test, args=(env,))
+        rl_thread.daemon = True
+        rl_thread.start()
 
     # Set up the figure and 3D axis for the real-time plot.
     fig = plt.figure()
