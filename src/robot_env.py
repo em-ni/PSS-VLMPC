@@ -19,9 +19,18 @@ class RobotEnv(gym.Env):
 
     def __init__(self):
         super(RobotEnv, self).__init__()
-        # Change action space to a discrete multi-dimensional space.
-        self.action_space = spaces.MultiDiscrete([config.max_stroke + 1] * 4)
-        # Observation space remains the same.
+
+        # Action space: 4 discrete actions (config.steps) for each motor and elongation
+        self.action_space = spaces.MultiDiscrete([config.steps] * 4)
+        self.action_mapping = {
+            # For each dimension, map 0-9 to your desired values
+            0: np.linspace(0, config.max_stroke, config.steps),  # First motor
+            1: np.linspace(0, config.max_stroke, config.steps),  # Second motor
+            2: np.linspace(0, config.max_stroke, config.steps),  # Third motor
+            3: np.linspace(0, config.max_stroke, config.steps),  # Elongation (all motors)
+        }
+        
+        # Observation space: 3D coordinates of the tip wrt to the base (shape: 3,)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
         
         self.tip = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -59,24 +68,33 @@ class RobotEnv(gym.Env):
         tip_min_z = data[tip_columns[2]].min() - base_z_avg
         tip_max_z = data[tip_columns[2]].max() - base_z_avg
         
-        lower_bound = np.array([tip_min_x, tip_min_y, tip_min_z])
-        upper_bound = np.array([tip_max_x, tip_max_y, tip_max_z])
+        lower_bound = np.array([tip_min_x, tip_min_y-0.5, tip_min_z-0.5])
+        upper_bound = np.array([tip_max_x, tip_max_y+0.5, tip_max_z+0.5])
 
-        print(f"Picked goal: {np.random.uniform(lower_bound, upper_bound).astype(np.float32)} within workspace bounds: {lower_bound} and {upper_bound}")
-        return np.random.uniform(lower_bound, upper_bound).astype(np.float32)
+        rand_goal = np.random.uniform(lower_bound, upper_bound).astype(np.float32)
+        print(f"Picked goal: {rand_goal} within workspace bounds: {lower_bound} and {upper_bound}")
+        return rand_goal
     
     def set_goal(self, goal):
         self.goal = goal
 
     def step(self, action):
-        # Extract the elongation component (4th action)
-        elongation = action[3]
+        # Map discrete actions to continuous values
+        mapped_action = np.array([
+            self.action_mapping[0][action[0]],
+            self.action_mapping[1][action[1]],
+            self.action_mapping[2][action[2]],
+            self.action_mapping[3][action[3]]
+        ])
+        
+        # Use mapped_action instead of action
+        elongation = mapped_action[3]
         
         # Create a new command vector with the first 3 actions adjusted by elongation
         command = np.zeros(3, dtype=np.float32)
         for i in range(3):
             # Combine each action with elongation, ensuring it stays within bounds
-            combined_action = min(action[i] + elongation, config.max_stroke)
+            combined_action = min(mapped_action[i] + elongation, config.max_stroke)
             command[i] = max(0, combined_action)  # Ensure non-negative
         
         # Send the modified command to the robot
@@ -85,28 +103,45 @@ class RobotEnv(gym.Env):
         distance = np.linalg.norm(self.tip - self.goal)
         terminated = False
         self.current_step += 1
-        distance_threshold = 1.9
+        reward = 0
+
+        ## Old way
+        # distance_threshold = 1.9
         
-        if distance > distance_threshold:
-            terminated = True
-            reward = 0
+        # if distance > distance_threshold:
+        #     # terminated = True
+        #     # reward = 0
+        #     reward -= 1  # Negative reward for being too far from the goal
+        # bonus = 0
+
+        # # Check 3d points alignment with the goal
+        # # Compute perpendicular distance from goal to the line defined by the origin and the tip.
+        # dist_to_line = np.linalg.norm(np.cross(self.tip, self.goal)) / np.linalg.norm(self.tip)
+
+        # # If the goal lies nearly on the line, add a bonus reward.
+        # if dist_to_line < 0.7 and np.linalg.norm(self.goal) > np.linalg.norm(self.tip):
+        #     bonus += 5
+        #     if distance < 0.5:
+        #         bonus += 10
+        #         if distance < 0.2:
+        #             bonus += 20
+        #             if distance < 0.1:
+        #                 bonus += 50
+
+        # if not terminated:
+        #     # reward = 1/(distance*(self.current_step**2)) + bonus
+        #     reward = 1/(0.5*distance+0.0001) + bonus
+
+        ## New way
+        if distance < 0.65:
+            reward += 1
+            self.goal = self.pick_goal()
+            print(f"Setting new goal at {self.goal}")
+
         print(f"Step {self.current_step}: Distance {distance} ")
         truncated = self.current_step >= self.max_steps  # episode timeout
         info = {"step": self.current_step, "distance": distance}
-        bonus = 0
 
-        # Check 3d points alignment with the goal
-        # Compute perpendicular distance from goal to the line defined by the origin and the tip.
-        dist_to_line = np.linalg.norm(np.cross(self.tip, self.goal)) / np.linalg.norm(self.tip)
-
-        # If the goal lies nearly on the line, add a bonus reward.
-        if dist_to_line < 0.7 and np.linalg.norm(self.goal) > np.linalg.norm(self.tip):
-            print("Bonus reward for elongation.")
-            bonus += 15
-
-        if not terminated:
-            # reward = 1/(distance*(self.current_step**2)) + bonus
-            reward = 1/(0.5*distance+0.0001) + bonus
 
         return self.tip, reward, terminated, truncated, info
     

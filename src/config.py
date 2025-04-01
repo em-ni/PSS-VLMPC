@@ -52,12 +52,11 @@ upper_blue = np.array([140, 255, 255])
 
 # Move settings
 home_first = False
-offset = 6
-initial_pos = 110 + offset
+initial_pos = 116
 steps = 10
 stroke = 4  # mm
 stepSize = stroke / steps
-max_stroke = 9
+max_stroke = 11
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
 max_vol_3 = initial_pos + max_stroke

@@ -28,6 +28,7 @@ class Tracker:
         # Backup base positions
         self.base_left_bck = None
         self.base_right_bck = None
+        self.first_base = False
 
         # Camera indices
         self.cam_left_index = config.cam_left_index
@@ -301,10 +302,16 @@ class Tracker:
         body_right = self.detect_body(img_right)
 
         # Backup the base positions
-        if base_left is not None:
+        if base_left is not None and base_right is not None and self.first_base is False:
             self.base_left_bck = base_left
-        if base_right is not None:
             self.base_right_bck = base_right
+            self.first_base = True
+
+        # Always use the very first detection of the base since the position is fixed
+        if self.base_left_bck is not None:
+            base_left = self.base_left_bck
+        if self.base_right_bck is not None:
+            base_right = self.base_right_bck
         
         if tip_left is None or base_left is None or tip_right is None or base_right is None or body_left is None or body_right is None:
             print("Couldn't detect all points in both images.")

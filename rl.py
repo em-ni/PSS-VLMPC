@@ -1,5 +1,6 @@
 from gymnasium.utils.env_checker import check_env
 from stable_baselines3 import A2C, PPO
+from stable_baselines3.common.callbacks import CheckpointCallback
 import threading
 import signal
 import matplotlib.pyplot as plt
@@ -14,14 +15,13 @@ from utils.circle_arc import calculate_circle_through_points
 import argparse
 
 
-
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="RL agent for real soft robot")
     parser.add_argument("--mode", type=str, choices=["train", "test"], required=True, 
                         help="Run in training or testing mode")
     parser.add_argument("--model_path", type=str, 
-                        help="Path to the trained policy model (required for test mode)")
+                        help="Path to the trained policy model (required for test mode, optional for train mode)")
     args = parser.parse_args()
 
     # Validate that model_path is provided when mode is test
@@ -42,16 +42,39 @@ if __name__ == '__main__':
 
     # Function to run RL training and evaluation.
     def train(env=env):
-        # Initialize the model
-        # model = PPO('MlpPolicy', env, verbose=1)
-        model = A2C("MlpPolicy", env, learning_rate=0.0005, ent_coef=0.3, verbose=1)
-        # model = A2C(CustomPolicy, env, verbose=1)
-
+        # Initialize the model or load from checkpoint if provided
+        if args.model_path and os.path.exists(args.model_path):
+            print(f"Loading model from {args.model_path} to continue training...")
+            try:
+                model = A2C.load(args.model_path, env=env)
+                print("Successfully loaded model for continued training")
+            except Exception as e:
+                print(f"Error loading model: {e}")
+                print("Creating new model instead...")
+                model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
+        else:
+            print("Starting new training run...")
+            model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
+        
+        # Create directory for saving checkpoints
+        checkpoint_dir = os.path.join(config.data_dir, "checkpoints")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        
+        # Create the checkpoint callback
+        checkpoint_callback = CheckpointCallback(
+            save_freq=10000, 
+            save_path=checkpoint_dir,
+            name_prefix="robot_model",
+            save_replay_buffer=True,
+            save_vecnormalize=True,
+        )
+        
         # Create the metrics callback
         metrics_callback = RobotTrainingMonitor()
         
-        # Train with callback
-        model.learn(total_timesteps=10000, callback=metrics_callback)
+        # Use both callbacks during training
+        model.learn(total_timesteps=100000, callback=[metrics_callback, checkpoint_callback])
+        
         print("\n--- Training complete. Starting evaluation ---")
 
         # Evaluate after training (with the trained model)
@@ -166,51 +189,66 @@ if __name__ == '__main__':
     body_scatter = ax.scatter([], [], [], s=5, c="blue")
 
     # Animation update function.
-    def animate(frame, plot_tracker=env.robot_api.get_tracker()):
-        base = plot_tracker.get_current_base()
-        tip = plot_tracker.get_current_tip()
-        body = plot_tracker.get_current_body()
-        
-        base_x, base_y, base_z = [], [], []
-        tip_x, tip_y, tip_z = [], [], []
-        body_x, body_y, body_z = [], [], []
-        
-        if base is not None:
-            base = base.ravel()
-            base_x, base_y, base_z = [base[0]], [base[1]], [base[2]]
-        if tip is not None:
-            tip = tip.ravel()
-            tip_x, tip_y, tip_z = [[x] for x in tip]
-        if body is not None:
-            body = body.ravel()
-            body_x, body_y, body_z = [body[0]], [body[1]], [body[2]]
-        
-        if base_x and base_y and base_z and tip_x and tip_y and tip_z:
-            dif_x, dif_y, dif_z = [tip_x[0] - base_x[0]], [tip_y[0] - base_y[0]], [tip_z[0] - base_z[0]]
-        else:
-            dif_x, dif_y, dif_z = [], [], []
+    def animate(frame, env=env):
+        try:
+            base = env.robot_api.get_tracker().get_current_base()
+            tip = env.robot_api.get_tracker().get_current_tip()
+            body = env.robot_api.get_tracker().get_current_body()
+            
+            base_x, base_y, base_z = [], [], []
+            tip_x, tip_y, tip_z = [], [], []
+            body_x, body_y, body_z = [], [], []
+            
+            if base is not None:
+                base = base.ravel()
+                base_x, base_y, base_z = [base[0]], [base[1]], [base[2]]
+            if tip is not None:
+                tip = tip.ravel()
+                tip_x, tip_y, tip_z = [[x] for x in tip]
+            if body is not None:
+                body = body.ravel()
+                body_x, body_y, body_z = [body[0]], [body[1]], [body[2]]
+            
+            if base_x and base_y and base_z and tip_x and tip_y and tip_z:
+                dif_x, dif_y, dif_z = [tip_x[0] - base_x[0]], [tip_y[0] - base_y[0]], [tip_z[0] - base_z[0]]
+            else:
+                dif_x, dif_y, dif_z = [], [], []
 
-        if body_x and body_y and body_z:
-            body_dif_x, body_dif_y, body_dif_z = [body_x[0]-base_x[0]], [body_y[0]-base_y[0]], [body_z[0]-base_z[0]]
-        else:
-            body_dif_x, body_dif_y, body_dif_z = [], [], []
+            if body_x and body_y and body_z:
+                body_dif_x, body_dif_y, body_dif_z = [body_x[0]-base_x[0]], [body_y[0]-base_y[0]], [body_z[0]-base_z[0]]
+            else:
+                body_dif_x, body_dif_y, body_dif_z = [], [], []
 
-        # Plot the base at the origin (yellow) and the tip difference (red).
-        base_scatter._offsets3d = ([0], [0], [0])
-        tip_scatter._offsets3d = (dif_x, dif_y, dif_z)
-        body_scatter._offsets3d = (body_dif_x, body_dif_y, body_dif_z)
+            # Update the goal coordinates
+            goal_coordinates = env.get_goal()
 
-        # Clear previous circle line if it exists
-        for line in ax.get_lines():
-            line.remove()
+            # Plot the base at the origin (yellow) and the tip difference (red).
+            base_scatter._offsets3d = ([0], [0], [0])
+            tip_scatter._offsets3d = (dif_x, dif_y, dif_z)
+            body_scatter._offsets3d = (body_dif_x, body_dif_y, body_dif_z)
+            goal_scatter._offsets3d = ([goal_coordinates[0]], [goal_coordinates[1]], [goal_coordinates[2]])
+
+            # Clear previous circle line if it exists
+            for line in ax.get_lines():
+                line.remove()
+            
+            # Draw circle if we have all three points
+            if base is not None and tip is not None and body is not None:
+                circle_points = calculate_circle_through_points(body-base, tip-base, [0,0,0])
+                ax.plot(circle_points[:, 0], circle_points[:, 1], circle_points[:, 2],
+                        label="Circle", color="blue", linewidth=5)
+                
+            # Periodically perform garbage collection (every 50 frames)
+            if frame % 50 == 0:
+                import gc
+                gc.collect()
+
+            return base_scatter, tip_scatter, body_scatter, goal_scatter
         
-        # Draw circle if we have all three points
-        if base is not None and tip is not None and body is not None:
-            circle_points = calculate_circle_through_points(body-base, tip-base, [0,0,0])
-            ax.plot(circle_points[:, 0], circle_points[:, 1], circle_points[:, 2],
-                    label="Circle", color="blue", linewidth=5)
-        return base_scatter, tip_scatter, body_scatter
+        except Exception as e:
+            print(f"Animation error: {e}")
+            return base_scatter, tip_scatter, body_scatter, goal_scatter
 
     # Create the animation. Adjust the interval as needed.
-    anim = animation.FuncAnimation(fig, animate, cache_frame_data=False, fargs=(env.robot_api.get_tracker(),), interval=50)
+    anim = animation.FuncAnimation(fig, animate, cache_frame_data=False, fargs=(env,), interval=50)
     plt.show()
