@@ -1,3 +1,4 @@
+import time
 from gymnasium.utils.env_checker import check_env
 from stable_baselines3 import A2C, PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
@@ -13,6 +14,7 @@ from src.custom_policy import CustomPolicy
 from src.robot_train_monitor import RobotTrainingMonitor
 from utils.circle_arc import calculate_circle_through_points
 import argparse
+from mpl_toolkits.mplot3d import art3d
 
 
 if __name__ == '__main__':
@@ -188,6 +190,17 @@ if __name__ == '__main__':
     goal_scatter = ax.scatter([goal_coordinates[0]], [goal_coordinates[1]], [goal_coordinates[2]], s=60, c="green")
     body_scatter = ax.scatter([], [], [], s=5, c="blue")
 
+    # Add this outside the animation function (run once)
+    def plot_hull_wireframe(hull, ax, color='lightgreen', alpha=0.1):
+        # Plot the hull wireframe
+        for simplex in hull.simplices:
+            pts = hull.points[simplex]
+            # Draw just the edges for better performance
+            for i in range(3):
+                xi, yi, zi = pts[i]
+                xj, yj, zj = pts[(i+1)%3]
+                line, = ax.plot([xi, xj], [yi, yj], [zi, zj], color=color, alpha=alpha)
+    
     # Animation update function.
     def animate(frame, env=env):
         try:
@@ -228,9 +241,10 @@ if __name__ == '__main__':
             body_scatter._offsets3d = (body_dif_x, body_dif_y, body_dif_z)
             goal_scatter._offsets3d = ([goal_coordinates[0]], [goal_coordinates[1]], [goal_coordinates[2]])
 
-            # Clear previous circle line if it exists
-            for line in ax.get_lines():
-                line.remove()
+            # Clear previous circle line if it exists, BUT NOT HULL LINES
+            for line in list(ax.get_lines()):
+                if not hasattr(line, 'is_hull_line'):  # Only remove non-hull lines
+                    line.remove()
             
             # Draw circle if we have all three points
             if base is not None and tip is not None and body is not None:
@@ -242,6 +256,8 @@ if __name__ == '__main__':
             if frame % 50 == 0:
                 import gc
                 gc.collect()
+
+            # plot_hull_wireframe(env.convex_hull, ax) # too slow
 
             return base_scatter, tip_scatter, body_scatter, goal_scatter
         
