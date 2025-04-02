@@ -52,14 +52,21 @@ upper_blue = np.array([140, 255, 255])
 
 # Move settings
 home_first = False
-initial_pos = 116
-steps = 10
-stroke = 4  # mm
-stepSize = stroke / steps
-max_stroke = 11
+initial_pos = 115
+steps = 6
+max_stroke = 3  # mm
+stepSize = max_stroke / steps
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
 max_vol_3 = initial_pos + max_stroke
+init_pressure = 1.0
+
+# Map quanser index to axis index
+axis_mapping = {
+    0: 2,  
+    1: 1,  
+    2: 3   
+}
 
 # Configuration (UDP receiver) (data: pressure sensors -> quanser -> simulink -> python)
 UDP_IP = "127.0.0.1"
@@ -77,6 +84,6 @@ else:
 input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
 
 # RL goal
-pick_random_goal = False
+pick_random_goal = True
 rl_goal = np.array([2.5, 1.7, 1.0], dtype=np.float32)
 

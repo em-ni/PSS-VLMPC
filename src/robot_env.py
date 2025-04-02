@@ -6,6 +6,9 @@ import pandas as pd
 import src.config as config
 import src.config as config
 from src.real_robot_api import RealRobotAPI
+import trimesh
+import pandas as pd
+from scipy.spatial import Delaunay
 
 
 class RobotEnv(gym.Env):
@@ -20,6 +23,12 @@ class RobotEnv(gym.Env):
     def __init__(self):
         super(RobotEnv, self).__init__()
 
+        # Load the point cloud from a CSV file and get the mesh 
+        print("Loading point cloud...")
+        pcd = self.load_point_cloud(r"data/exp_2025-04-02_11-43-59/output_exp_2025-04-02_11-43-59.csv") 
+        self.mesh = self.reconstruct_mesh(pcd)
+        print("Point cloud loaded.")
+        
         # Action space: 4 discrete actions (config.steps) for each motor and elongation
         self.action_space = spaces.MultiDiscrete([config.steps] * 4)
         self.action_mapping = {
@@ -44,37 +53,69 @@ class RobotEnv(gym.Env):
 
     def get_goal(self):
         return self.goal
+    
+
+    def load_point_cloud(self, filename):
+        """Load a point cloud from a CSV file and compute the difference between tip and base coordinates."""
+        # Load CSV
+        df = pd.read_csv(filename)
+        
+        # Compute point cloud as difference between tip and base coordinates
+        points = df[['tip_x', 'tip_y', 'tip_z']].values - df[['base_x', 'base_y', 'base_z']].values
+        
+        return points
 
     def pick_goal(self):
         """
         Pick a random goal within the workspace.
         """
-        exp_name = "exp_2025-03-17_15-26-06"
-        csv_name = "output_exp_2025-03-17_15-26-06.csv"
-        csv_path = os.path.join(config.data_dir, exp_name, csv_name)
 
-        data = pd.read_csv(csv_path)
-        tip_columns = ['tip_x', 'tip_y', 'tip_z']
-        base_columns = ['base_x', 'base_y', 'base_z']
+        return self.sample_points_in_mesh(self.mesh, num_samples=1)[0]
+        # data = pd.read_csv(csv_path)
+        # tip_columns = ['tip_x', 'tip_y', 'tip_z']
+        # base_columns = ['base_x', 'base_y', 'base_z']
 
-        base_x_avg = data[base_columns[0]].mean()
-        base_y_avg = data[base_columns[1]].mean()
-        base_z_avg = data[base_columns[2]].mean()
+        # base_x_avg = data[base_columns[0]].mean()
+        # base_y_avg = data[base_columns[1]].mean()
+        # base_z_avg = data[base_columns[2]].mean()
 
-        tip_min_x = data[tip_columns[0]].min() - base_x_avg
-        tip_max_x = data[tip_columns[0]].max() - base_x_avg
-        tip_min_y = data[tip_columns[1]].min() - base_y_avg
-        tip_max_y = data[tip_columns[1]].max() - base_y_avg
-        tip_min_z = data[tip_columns[2]].min() - base_z_avg
-        tip_max_z = data[tip_columns[2]].max() - base_z_avg
+        # tip_min_x = data[tip_columns[0]].min() - base_x_avg
+        # tip_max_x = data[tip_columns[0]].max() - base_x_avg
+        # tip_min_y = data[tip_columns[1]].min() - base_y_avg
+        # tip_max_y = data[tip_columns[1]].max() - base_y_avg
+        # tip_min_z = data[tip_columns[2]].min() - base_z_avg
+        # tip_max_z = data[tip_columns[2]].max() - base_z_avg
         
-        lower_bound = np.array([tip_min_x, tip_min_y-0.5, tip_min_z-0.5])
-        upper_bound = np.array([tip_max_x, tip_max_y+0.5, tip_max_z+0.5])
+        # lower_bound = np.array([tip_min_x, tip_min_y-0.5, tip_min_z-0.5])
+        # upper_bound = np.array([tip_max_x, tip_max_y+0.5, tip_max_z+0.5])
 
-        rand_goal = np.random.uniform(lower_bound, upper_bound).astype(np.float32)
-        print(f"Picked goal: {rand_goal} within workspace bounds: {lower_bound} and {upper_bound}")
-        return rand_goal
+        # rand_goal = np.random.uniform(lower_bound, upper_bound).astype(np.float32)
+        # print(f"Picked goal: {rand_goal} within workspace bounds: {lower_bound} and {upper_bound}")
+        # return rand_goal
     
+    def reconstruct_mesh(self, point_cloud):
+        """Reconstruct a watertight mesh from a point cloud using Delaunay triangulation."""
+        tri = Delaunay(point_cloud)
+        mesh = trimesh.Trimesh(vertices=point_cloud, faces=tri.simplices)
+        return mesh
+
+
+    def sample_points_in_mesh(self, mesh, num_samples=1):
+        """Sample random points inside a watertight mesh using rejection sampling."""
+        # Compute the bounding box
+        bbox_min, bbox_max = mesh.bounds
+        samples = []
+
+        while len(samples) < num_samples:
+            # Generate a random point in the bounding box
+            random_point = np.random.uniform(bbox_min, bbox_max)
+            
+            # Check if the point is inside the mesh using ray casting
+            if mesh.contains(random_point.reshape(1, -1)):
+                samples.append(random_point)
+
+        return np.array(samples)
+
     def set_goal(self, goal):
         self.goal = goal
 
@@ -154,7 +195,7 @@ class RobotEnv(gym.Env):
 
         if config.pick_random_goal:
             # Change goal with 20% probability.
-            if np.random.random() < 0.2:
+            if np.random.random() < 0.4:
                 self.goal = self.pick_goal()
                 print(f"Setting new goal at {self.goal}")
         return self.tip, {}

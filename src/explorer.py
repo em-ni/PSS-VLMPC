@@ -230,8 +230,8 @@ class Explorer:
 
         try:
             # Execute the movement
-            # self.move()
-            self.move_from_csv()
+            self.move()
+            # self.move_from_csv()
         except Exception as exception:
             print("An error occurred, stopping the motors")
             print(exception)

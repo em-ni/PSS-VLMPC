@@ -1,15 +1,18 @@
 
+import os
+import sys
 import time
 from zaber_motion import Units
 from zaber_motion.ascii import Connection
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import src.config as config
 
-home_first = False
-initial_pos = 110 + 6
+home_first = config.home_first
+initial_pos = config.initial_pos
 
 # Open connection on COM3
 connection = Connection.open_serial_port('COM3')
 connection.enable_alerts()
-
 
 # connection.enableAlerts()  # (commented out as in MATLAB)
 device_list = connection.detect_devices()
