@@ -16,7 +16,7 @@ import yaml
 import time
 from zaber_motion import Units
 from zaber_motion.ascii import Connection
-from src.pressure_net import PressureNet
+from src.nn_model import PressureNet
 from src import config
 
 # Common functions
