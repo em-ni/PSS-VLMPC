@@ -1,0 +1,10 @@
+Test Loss (MSE): 0.038662
+Denormalized Test MAE (x, y, z): [0.31465831 0.18549975 0.27940454]
+Mean Denormalized Test MAE: 0.259854
+Denormalized Test RMSE (x, y, z): [0.39099294 0.22331273 0.33313929]
+Mean Denormalized Test RMSE: 0.315815
+
+Training Details:
+Epochs completed: 203
+Best validation loss: 0.026411
+Final learning rate: 0.000700

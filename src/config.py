@@ -3,6 +3,11 @@ import os
 import time
 import numpy as np
 
+# TODO
+# collect observations: tip, base and actions up to 3 steps before t-3
+# train LSTM model with the collected data
+# run rl agent with the trained model
+
 new_experiment = False
 
 # Cameras
@@ -79,6 +84,15 @@ if pressure_only:
     output_dim = 3
 else:
     output_dim = 6
+
+# LSTM
+sequence_length = 4  # T=3 -> sequence length 4 (t, t-1, t-2, t-3)
+n_features_tau = 3   # volume_1, volume_2, volume_3
+n_features_x = 3     # delta_x, delta_y, delta_z = tip_x, tip_y, tip_z - base_x, base_y, base_z
+total_features = n_features_tau + n_features_x
+output_dim = n_features_x
+lstm_hidden_units = 64
+lstm_num_layers = 2    
 
 # Path to volume inputs (to be used in explorer.move_from_csv)
 input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
