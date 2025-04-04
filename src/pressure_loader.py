@@ -124,3 +124,7 @@ class PressureLoader:
                 print("Max stroke reached for axis 3. Stopping.")
                 break
             print(f"Axis 3: {config.initial_pos + offset_3} mm")
+
+if __name__ == "__main__":
+    pressure_loader = PressureLoader()
+    pressure_loader.load_pressure()

@@ -3,11 +3,6 @@ import os
 import time
 import numpy as np
 
-# TODO
-# collect observations: tip, base and actions up to 3 steps before t-3
-# train LSTM model with the collected data
-# run rl agent with the trained model
-
 new_experiment = False
 
 # Cameras
@@ -57,8 +52,8 @@ upper_blue = np.array([140, 255, 255])
 
 # Move settings
 home_first = False
-initial_pos = 115
-steps = 6
+initial_pos = 116
+steps = 21
 max_stroke = 3  # mm
 stepSize = max_stroke / steps
 max_vol_1 = initial_pos + max_stroke

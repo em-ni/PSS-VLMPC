@@ -352,7 +352,7 @@ class Tracker:
 if __name__ == "__main__":
 
     # Experiment name
-    experiment_name = "exp_2025-02-27_12-16-06"
+    experiment_name = "exp_2025-04-04_19-17-42"
     save_dir = os.path.join(".", "data", experiment_name)
     output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
 
