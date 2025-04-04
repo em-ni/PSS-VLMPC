@@ -1,4 +1,5 @@
 from stable_baselines3 import A2C, PPO
+from sb3_contrib import TRPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 import threading
 import signal
@@ -7,7 +8,7 @@ import matplotlib.animation as animation
 import os
 import src.config as config
 from src.robot_env import RobotEnv
-from src.robot_train_monitor import RobotTrainingMonitor
+from src.rl_train_monitor import RobotTrainingMonitor
 from src.sim_robot_env import SimRobotEnv
 from utils.circle_arc import calculate_circle_through_points
 import argparse
@@ -49,19 +50,35 @@ if __name__ == '__main__':
 
     # Function to run RL training and evaluation.
     def train(env=env):
+        # Determine algorithm type
+        # algorithm = "A2C"  
+        algorithm = TRPO
+        
+        if args.model_path and "trpo" in args.model_path.lower():
+            algorithm = "TRPO"
+        
         # Initialize the model or load from checkpoint if provided
         if args.model_path and os.path.exists(args.model_path):
-            print(f"Loading model from {args.model_path} to continue training...")
+            print(f"Loading {algorithm} model from {args.model_path} to continue training...")
             try:
-                model = A2C.load(args.model_path, env=env)
-                print("Successfully loaded model for continued training")
+                if algorithm == "TRPO":
+                    model = TRPO.load(args.model_path, env=env)
+                else:
+                    model = A2C.load(args.model_path, env=env)
+                print(f"Successfully loaded {algorithm} model for continued training")
             except Exception as e:
                 print(f"Error loading model: {e}")
-                print("Creating new model instead...")
-                model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
+                print(f"Creating new {algorithm} model instead...")
+                if algorithm == "TRPO":
+                    model = TRPO("MlpPolicy", env, verbose=1)
+                else:
+                    model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
         else:
-            print("Starting new training run...")
-            model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
+            print(f"Starting new training run with {algorithm}...")
+            if algorithm == "TRPO":
+                model = TRPO("MlpPolicy", env, verbose=1)
+            else:
+                model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
         
         # Create directory for saving checkpoints
         checkpoint_dir = os.path.join(config.data_dir, "checkpoints")
