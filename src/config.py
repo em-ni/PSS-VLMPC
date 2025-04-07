@@ -81,7 +81,7 @@ else:
     output_dim = 6
 
 # LSTM
-sequence_length = 4  # T=3 -> sequence length 4 (t, t-1, t-2, t-3)
+sequence_length = 1  # T=3 -> sequence length 4 (t, t-1, t-2, t-3)
 n_features_tau = 3   # volume_1, volume_2, volume_3
 n_features_x = 3     # delta_x, delta_y, delta_z = tip_x, tip_y, tip_z - base_x, base_y, base_z
 total_features = n_features_tau + n_features_x

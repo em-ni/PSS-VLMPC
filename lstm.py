@@ -16,324 +16,247 @@ import src.config as config
 
 def parse_args():
     parser = argparse.ArgumentParser(description='LSTM model training')
-    parser.add_argument('--mode', type=str, choices=['train'], default='train',
+    parser.add_argument('--mode', type=str, choices=['train', 'test'], default='train',
                        help='Mode to run the script (only "train" supported for now)')
-    parser.add_argument('--data', type=str, required=True,
-                       help='Path to the data file')
+    parser.add_argument('--data', type=str, required=False,
+                       help='Path to the CSV data file for training')
+    parser.add_argument('--model', type=str, required=False,
+                       help='Path to the model file for testing')
+    parser.add_argument('--test_input', type=str, required=False,
+                       help='Path to the input file for testing')
     return parser.parse_args()
 
-def main():
-    # Parse command line arguments
-    args = parse_args()
+def train_model(args):
+    # Load data
+    df = pd.read_csv(args.data)
     
-    # Use the provided data path
-    FILE_PATH = args.data
+    # Compute x as the difference between tip and base coordinates
+    # (this gives the 3d position error vector for the end-effector)
+    df['x_tip'] = df['tip_x'] - df['base_x']
+    df['y_tip'] = df['tip_y'] - df['base_y']
+    df['z_tip'] = df['tip_z'] - df['base_z']
     
-    # --- 0. Device Configuration ---
+    # Extract x (3d position) and tau (3d actuation)
+    # Note: according to the dataset the same row's volumes correspond to τ_t,
+    # and the coordinates are x_t+1.
+    x = df[['x_tip', 'y_tip', 'z_tip']].values  # shape (N, 3)
+    tau = df[['volume_1', 'volume_2', 'volume_3']].values  # shape (N, 3)
+    
+    # We will build sequences with horizon T = 3.
+    # The mapping is: (τ_t, τ_{t-1}, τ_{t-2}, τ_{t-3}, x_t, x_{t-1}, x_{t-2}, x_{t-3}) -> x_{t+1}
+    # To do so, we will construct sequences of 4 consecutive x's and tau's.
+    T = 3
+    X_seq = []
+    tau_seq = []
+    y_target = []
+    
+    # We start at index T (so that we have 4 x values: x[t-3] ... x[t]) and use x[t+1] as target.
+    for i in range(T, len(df) - 1):
+        # Sequence of x from t-3 to t (length T+1 = 4)
+        seq_x = x[i - T:i + 1]  # shape (4, 3)
+        # Use tau sequence from t-3 to t (same historical window as x)
+        seq_tau = tau[i - T:i + 1]  # shape (4, 3)
+        target = x[i + 1]  # this is x_{t+1}
+        
+        X_seq.append(seq_x)
+        tau_seq.append(seq_tau)
+        y_target.append(target)
+    
+    X_seq = np.array(X_seq)   # shape (samples, 4, 3)
+    tau_seq = np.array(tau_seq)  # shape (samples, 4, 3)
+    y_target = np.array(y_target)  # shape (samples, 3)
+    
+    # Scale the x values to the range [-1, 1]
+    scaler_x = MinMaxScaler(feature_range=(-1, 1))
+    X_seq_reshaped = X_seq.reshape(-1, 3)
+    scaler_x.fit(X_seq_reshaped)
+    X_seq_scaled = scaler_x.transform(X_seq_reshaped).reshape(X_seq.shape)
+    y_target_scaled = scaler_x.transform(y_target)
+    
+    # Scale tau as well to [-1, 1]
+    scaler_tau = MinMaxScaler(feature_range=(-1, 1))
+    tau_seq_reshaped = tau_seq.reshape(-1, 3)
+    scaler_tau.fit(tau_seq_reshaped)
+    tau_seq_scaled = scaler_tau.transform(tau_seq_reshaped).reshape(tau_seq.shape)
+    
+    # Incorporate tau into the input sequence by concatenating with x at each timestep
+    X_input = np.concatenate([X_seq_scaled, tau_seq_scaled], axis=2)  # shape (samples, 4, 6)
+    
+    # Model parameters
+    input_dim = 6        # 3 for x and 3 for τ at each timestep
+    hidden_dim = config.hidden_dim if hasattr(config, 'hidden_dim') else 64
+    output_dim = 3       # predicting 3d x_{t+1}
+    num_layers = config.num_layers if hasattr(config, 'num_layers') else 2
+    
+    # Initialize model and move to device
+    model = LSTMModel(input_dim, hidden_dim, output_dim, num_layers)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    model = model.to(device)
     
-    # --- 1. Configuration (same as before) ---
-    # FILE_PATH is now defined from command line arguments
+    # Create training and validation datasets
+    X_tensor = torch.tensor(X_input, dtype=torch.float32)
+    y_tensor = torch.tensor(y_target_scaled, dtype=torch.float32)
+    dataset = TensorDataset(X_tensor, y_tensor)
+    train_data, val_data = train_test_split(dataset, test_size=0.15, random_state=42)
     
-    # ACTIVATION 'tanh' is the default for PyTorch LSTM
-    LEARNING_RATE = 0.001
-    EPOCHS = 500 # Max epochs, EarlyStopping will control
-    BATCH_SIZE = 64
-    VALIDATION_SPLIT_RATIO = 0.10 / (1.0 - 0.15) # 10% validation from the non-test set
-    TEST_SPLIT_RATIO = 0.15
+    train_loader = DataLoader(train_data, batch_size=64, shuffle=True)
+    val_loader = DataLoader(val_data, batch_size=64, shuffle=False)
     
-    # Callbacks parameters from paper
-    EARLY_STOPPING_PATIENCE = 100
-    LR_REDUCE_PATIENCE = 50
-    LR_REDUCE_FACTOR = 0.7
-    
-    # --- 2. Data Loading and Preprocessing (same as before) ---
-    print("Loading data...")
-    try:
-        df = pd.read_csv(FILE_PATH)
-    except FileNotFoundError:
-        print(f"Error: File not found at {FILE_PATH}")
-        print("Please provide a valid file path with -data argument.")
-        exit()
-    
-    print("Calculating relative position 'x'...")
-    df['delta_x'] = df['tip_x'] - df['base_x']
-    df['delta_y'] = df['tip_y'] - df['base_y']
-    df['delta_z'] = df['tip_z'] - df['base_z']
-
-    feature_cols = ['volume_1', 'volume_2', 'volume_3', 'delta_x', 'delta_y', 'delta_z']
-    data = df[feature_cols].values
-
-    print(f"Original data shape: {data.shape}")
-
-    # Normalize features to [-1, 1] range
-    print("Normalizing data...")
-    scaler = MinMaxScaler(feature_range=(-1, 1))
-    data_scaled = scaler.fit_transform(data)
-
-    # Create sequences
-    print(f"Creating sequences with length {config.sequence_length}...")
-    X, y = [], []
-    for i in range(len(data_scaled) - config.sequence_length):
-        sequence = data_scaled[i:i + config.sequence_length]
-        target = data_scaled[i + config.sequence_length, config.n_features_tau:]
-        X.append(sequence)
-        y.append(target)
-
-    X = np.array(X)
-    y = np.array(y)
-
-    print(f"Shape of X (sequences): {X.shape}")
-    print(f"Shape of y (targets): {y.shape}")
-
-    # Split data
-    print("Splitting data into train, validation, and test sets...")
-    X_train_val, X_test, y_train_val, y_test = train_test_split(
-        X, y, test_size=TEST_SPLIT_RATIO, random_state=42, shuffle=False
-    )
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_val, y_train_val, test_size=VALIDATION_SPLIT_RATIO, random_state=42, shuffle=False
-    )
-
-    # Convert to PyTorch Tensors
-    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train, dtype=torch.float32)
-    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
-    y_val_tensor = torch.tensor(y_val, dtype=torch.float32)
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test, dtype=torch.float32)
-
-    # Create TensorDatasets and DataLoaders
-    train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-    val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-    test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
-
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False) # Maintain order
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
-    print(f"Train shapes: X={X_train_tensor.shape}, y={y_train_tensor.shape}")
-    print(f"Validation shapes: X={X_val_tensor.shape}, y={y_val_tensor.shape}")
-    print(f"Test shapes: X={X_test_tensor.shape}, y={y_test_tensor.shape}")
-
-    # --- 3. Build LSTM Model (PyTorch) ---
-    print("Building PyTorch LSTM model...")
-    model = LSTMModel(config.total_features, config.lstm_hidden_units, config.output_dim, config.lstm_num_layers).to(device)
-    print(model)
-
-    # Loss and Optimizer
+    # Define loss, optimizer, and LR scheduler
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    # Learning Rate Scheduler (equivalent to ReduceLROnPlateau)
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=LR_REDUCE_FACTOR,
-        patience=LR_REDUCE_PATIENCE,
-        verbose=True
-    )
-
-    # --- 4. Train LSTM Model (PyTorch) ---
-    print("Training model...")
-
-    train_losses = []
-    val_losses = []
-    learning_rates = []
-
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=50)
+    
+    # Training loop with early stopping (patience = 100 epochs)
     best_val_loss = float('inf')
-    epochs_no_improve = 0
-    best_model_state = None
-
-    for epoch in range(EPOCHS):
-        model.train()  # Set model to training mode
-        running_train_loss = 0.0
-        for i, (sequences, targets) in enumerate(train_loader):
-            sequences, targets = sequences.to(device), targets.to(device)
-
-            # Forward pass
-            outputs = model(sequences)
-            loss = criterion(outputs, targets)
-
-            # Backward pass and optimize
+    best_model_wts = copy.deepcopy(model.state_dict())
+    patience_counter = 0
+    num_epochs = 1000
+    
+    for epoch in range(num_epochs):
+        model.train()
+        train_loss = 0.0
+        for X_batch, y_batch in train_loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
+            
             optimizer.zero_grad()
+            outputs = model(X_batch)
+            loss = criterion(outputs, y_batch)
             loss.backward()
             optimizer.step()
-
-            running_train_loss += loss.item() * sequences.size(0) # Multiply by batch size
-
-        epoch_train_loss = running_train_loss / len(train_loader.dataset)
-        train_losses.append(epoch_train_loss)
-
-        # Validation loop
-        model.eval()  # Set model to evaluation mode
-        running_val_loss = 0.0
-        with torch.no_grad(): # Disable gradient calculations
-            for sequences, targets in val_loader:
-                sequences, targets = sequences.to(device), targets.to(device)
-                outputs = model(sequences)
-                loss = criterion(outputs, targets)
-                running_val_loss += loss.item() * sequences.size(0)
-
-        epoch_val_loss = running_val_loss / len(val_loader.dataset)
-        val_losses.append(epoch_val_loss)
-        current_lr = optimizer.param_groups[0]['lr']
-        learning_rates.append(current_lr)
-
-        print(f'Epoch [{epoch+1}/{EPOCHS}], Train Loss: {epoch_train_loss:.6f}, Val Loss: {epoch_val_loss:.6f}, LR: {current_lr:.6f}')
-
-        # Learning Rate Scheduler step
-        scheduler.step(epoch_val_loss)
-
-        # Early Stopping check
-        if epoch_val_loss < best_val_loss:
-            best_val_loss = epoch_val_loss
-            epochs_no_improve = 0
-            # Save the best model state
-            best_model_state = copy.deepcopy(model.state_dict())
-            print(f'Validation loss improved. Saving model state at epoch {epoch+1}.')
+            
+            train_loss += loss.item() * X_batch.size(0)
+        train_loss /= len(train_loader.dataset)
+        
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for X_batch, y_batch in val_loader:
+                X_batch = X_batch.to(device)
+                y_batch = y_batch.to(device)
+                outputs = model(X_batch)
+                loss = criterion(outputs, y_batch)
+                val_loss += loss.item() * X_batch.size(0)
+        val_loss /= len(val_loader.dataset)
+        scheduler.step(val_loss)
+        
+        print(f"Epoch {epoch}: Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}")
+        
+        # Early stopping check
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_wts = copy.deepcopy(model.state_dict())
+            patience_counter = 0
         else:
-            epochs_no_improve += 1
-            print(f'Validation loss did not improve for {epochs_no_improve} epoch(s).')
-
-        if epochs_no_improve >= EARLY_STOPPING_PATIENCE:
-            print(f'Early stopping triggered after {epoch+1} epochs.')
-            # Restore best model weights
-            if best_model_state:
-                 model.load_state_dict(best_model_state)
-                 print("Restored best model weights.")
-            else:
-                 print("Warning: Early stopping triggered but no best model state was saved.")
+            patience_counter += 1
+        if patience_counter >= 100:
+            print("Early stopping triggered")
             break
 
-    # --- 5. Evaluate Model (PyTorch) ---
-    print("\nEvaluating model on test data...")
-    # Ensure the best model is loaded if early stopping occurred
-    if best_model_state:
-        model.load_state_dict(best_model_state)
+    # Load best model weights and save the model
+    model.load_state_dict(best_model_wts)
+    model_path = os.path.join("models", "lstm_model.pth")
+    os.makedirs("models", exist_ok=True)
+    torch.save(model.state_dict(), model_path)
+    print("Model saved to", model_path)
 
-    model.eval() # Set to evaluation mode
-    test_loss = 0.0
-    all_predictions_scaled = []
-    all_targets_scaled = []
-
+def test_model(args):
+    # Check that the test input and model file are provided
+    if not args.test_input:
+        print("Error: Test input file is required. Use --test_input to specify.")
+        return
+    
+    if not args.model and not os.path.exists(os.path.join("models", "lstm_model.pth")):
+        print("Error: Model file is required. Use --model to specify or train a model first.")
+        return
+    
+    # Read the test input file (each line has volumes and coordinates)
+    with open(args.test_input, 'r') as f:
+        lines = f.readlines()
+    
+    if len(lines) < 5:  # Need at least 4 historical points + 1 target
+        print("Error: Test file must contain at least 5 lines (4 for history and 1 for target)")
+        return
+    
+    # Parse the input data
+    input_data = []
+    for line in lines:
+        values = [float(val) for val in line.strip().split(',')]
+        if len(values) != 6:  # 3 volumes + 3 coordinates
+            print(f"Error: Each line must contain 6 values (vol1,vol2,vol3,x,y,z), got {len(values)}")
+            return
+        input_data.append(values)
+    
+    # Convert to numpy array and extract volumes and positions
+    input_data = np.array(input_data)
+    
+    # Last line is the target (for validation if available)
+    target = input_data[-1, 3:] if len(input_data) > 4 else None
+    
+    # Use only the first 4 lines for prediction
+    history_data = input_data[:4]
+    volumes = history_data[:, :3]  # First 3 columns are volumes
+    positions = history_data[:, 3:]  # Last 3 columns are positions
+    
+    # Create the sequence similar to training
+    X_seq = positions.reshape(1, 4, 3)  # shape (1, 4, 3)
+    tau_seq = volumes.reshape(1, 4, 3)  # shape (1, 4, 3)
+    
+    # Scale the inputs using similar scalers to training
+    # For positions
+    scaler_x = MinMaxScaler(feature_range=(-1, 1))
+    X_seq_reshaped = X_seq.reshape(-1, 3)
+    scaler_x.fit(X_seq_reshaped)
+    X_seq_scaled = scaler_x.transform(X_seq_reshaped).reshape(X_seq.shape)
+    
+    # For volumes
+    scaler_tau = MinMaxScaler(feature_range=(-1, 1))
+    tau_seq_reshaped = tau_seq.reshape(-1, 3)
+    scaler_tau.fit(tau_seq_reshaped)
+    tau_seq_scaled = scaler_tau.transform(tau_seq_reshaped).reshape(tau_seq.shape)
+    
+    # Combine inputs
+    X_input = np.concatenate([X_seq_scaled, tau_seq_scaled], axis=2)  # shape (1, 4, 6)
+    
+    # Convert to tensor
+    X_tensor = torch.tensor(X_input, dtype=torch.float32)
+    
+    # Load the model
+    model_path = args.model if args.model else os.path.join("models", "lstm_model.pth")
+    input_dim = 6
+    hidden_dim = config.hidden_dim if hasattr(config, 'hidden_dim') else 64
+    output_dim = 3
+    num_layers = config.num_layers if hasattr(config, 'num_layers') else 2
+    
+    model = LSTMModel(input_dim, hidden_dim, output_dim, num_layers)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    model.eval()
+    
+    # Make prediction
     with torch.no_grad():
-        for sequences, targets in test_loader:
-            sequences, targets = sequences.to(device), targets.to(device)
-            outputs = model(sequences)
-            loss = criterion(outputs, targets)
-            test_loss += loss.item() * sequences.size(0)
-            all_predictions_scaled.append(outputs.cpu().numpy()) # Move back to CPU for numpy
-            all_targets_scaled.append(targets.cpu().numpy())
-
-    avg_test_loss = test_loss / len(test_loader.dataset)
-    print(f"Test Loss (MSE): {avg_test_loss:.6f}")
-
-    y_pred_scaled = np.concatenate(all_predictions_scaled, axis=0)
-    y_test_scaled = np.concatenate(all_targets_scaled, axis=0) # This is y_test_tensor as numpy
-
-
-    # --- 6. Denormalize and Calculate Metrics (same as before) ---
-    print("\nDenormalizing predictions and calculating metrics...")
-    # Create dummy arrays for scaler inverse transform
-    dummy_pred = np.zeros((len(y_pred_scaled), config.total_features))
-    dummy_pred[:, config.n_features_tau:] = y_pred_scaled
-
-    dummy_true = np.zeros((len(y_test_scaled), config.total_features))
-    dummy_true[:, config.n_features_tau:] = y_test_scaled # Use the scaled test targets
-
-    # Denormalize
-    y_pred_denormalized = scaler.inverse_transform(dummy_pred)[:, config.n_features_tau:]
-    y_test_denormalized = scaler.inverse_transform(dummy_true)[:, config.n_features_tau:]
-
-    # Calculate MAE
-    mae = np.mean(np.abs(y_test_denormalized - y_pred_denormalized), axis=0)
-    mean_mae = np.mean(mae)
-    print(f"Denormalized Test MAE (x, y, z): {mae}")
-    print(f"Mean Denormalized Test MAE: {mean_mae}")
-
-    # Calculate RMSE
-    rmse = np.sqrt(np.mean((y_test_denormalized - y_pred_denormalized)**2, axis=0))
-    mean_rmse = np.mean(rmse)
-    print(f"Denormalized Test RMSE (x, y, z): {rmse}")
-    print(f"Mean Denormalized Test RMSE: {mean_rmse}")
-
-    # --- 7. Plot Training History (adapted for PyTorch lists) ---
-    print("\nPlotting training history...")
-    epochs_range = range(1, len(train_losses) + 1)
-
-    plt.figure(figsize=(12, 6))
-
-    plt.subplot(1, 2, 1)
-    plt.plot(epochs_range, train_losses, label='Training Loss')
-    plt.plot(epochs_range, val_losses, label='Validation Loss')
-    plt.title('Model Loss (MSE)')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.grid(True)
-
-    plt.subplot(1, 2, 2)
-    plt.plot(epochs_range, learning_rates, label='Learning Rate')
-    plt.title('Learning Rate Schedule')
-    plt.xlabel('Epoch')
-    plt.ylabel('Learning Rate')
-    plt.legend()
-    plt.grid(True)
-
-    plt.tight_layout()
-    plt.show()
-
-    # --- 8. Save Model and Results ---
-    print("\nSaving model and results...")
-
-    # Get the directory from the input file path
-    save_dir = os.path.dirname(FILE_PATH)
-    model_filename = os.path.join(save_dir, "lstm_model.pth")
-    plot_filename = os.path.join(save_dir, "lstm_training_plots.png")
-    metrics_filename = os.path.join(save_dir, "lstm_metrics.txt")
-
-    # Save the model with all necessary information
-    torch.save({
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'scaler': scaler,
-        'config': {
-            'config.sequence_length': config.sequence_length,
-            'config.n_features_tau': config.n_features_tau,
-            'config.n_features_x': config.n_features_x,
-            'config.lstm_hidden_units': config.lstm_hidden_units,
-            'config.lstm_num_layers': config.lstm_num_layers
-        },
-        'performance': {
-            'test_loss': avg_test_loss,
-            'mae': mae.tolist(),
-            'rmse': rmse.tolist(),
-            'mean_mae': mean_mae,
-            'mean_rmse': mean_rmse
-        }
-    }, model_filename)
-    print(f"Model saved to {model_filename}")
-
-    # Save the training plots
-    plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-    print(f"Training plots saved to {plot_filename}")
-
-    # Save metrics to a text file
-    with open(metrics_filename, 'w') as f:
-        f.write(f"Test Loss (MSE): {avg_test_loss:.6f}\n")
-        f.write(f"Denormalized Test MAE (x, y, z): {mae}\n")
-        f.write(f"Mean Denormalized Test MAE: {mean_mae:.6f}\n")
-        f.write(f"Denormalized Test RMSE (x, y, z): {rmse}\n")
-        f.write(f"Mean Denormalized Test RMSE: {mean_rmse:.6f}\n")
+        prediction_scaled = model(X_tensor).numpy()
+    
+    # Convert prediction back to original scale
+    prediction = scaler_x.inverse_transform(prediction_scaled)[0]
+    
+    print("\nModel Prediction:")
+    print(f"Predicted next position: x={prediction[0]:.4f}, y={prediction[1]:.4f}, z={prediction[2]:.4f}")
+    
+    # Compare with target if available
+    if target is not None:
+        print("\nActual vs Predicted:")
+        print(f"Actual: x={target[0]:.4f}, y={target[1]:.4f}, z={target[2]:.4f}")
+        print(f"Predicted: x={prediction[0]:.4f}, y={prediction[1]:.4f}, z={prediction[2]:.4f}")
         
-        # Add training details
-        f.write("\nTraining Details:\n")
-        f.write(f"Epochs completed: {len(train_losses)}\n")
-        f.write(f"Best validation loss: {best_val_loss:.6f}\n")
-        f.write(f"Final learning rate: {learning_rates[-1]:.6f}\n")
-    print(f"Metrics saved to {metrics_filename}")
+        # Calculate error
+        error = np.sqrt(np.sum((prediction - target)**2))
+        print(f"Euclidean error: {error:.4f}")
 
 if __name__ == "__main__":
-    main()
-
+    args = parse_args()
+    if args.mode == 'train':
+        train_model(args)
+    elif args.mode == 'test':
+        test_model(args)

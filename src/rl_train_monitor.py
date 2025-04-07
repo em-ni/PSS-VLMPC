@@ -11,7 +11,7 @@ class RobotTrainingMonitor(BaseCallback):
     """
     Custom callback to monitor training metrics and generate plots
     """
-    def __init__(self, verbose=1, save_freq=100, plot_freq=1000):
+    def __init__(self, verbose=1, save_freq=100, plot_freq=1000, live_plot=True):
         super(RobotTrainingMonitor, self).__init__(verbose)
         # Metrics storage
         self.episode_rewards = []
@@ -33,6 +33,16 @@ class RobotTrainingMonitor(BaseCallback):
         # Settings
         self.save_freq = save_freq  # Episodes between saves
         self.plot_freq = plot_freq  # Episodes between plots
+        self.live_plot = live_plot   # Whether to show live plots
+        
+        # Live plotting
+        self.fig = None
+        self.ax1 = None
+        self.ax2 = None
+        self.reward_line = None
+        self.avg_reward_line = None
+        self.distance_line = None
+        self.live_update_freq = 5  # Update live plot every N episodes
         
         # Output directory setup
         self.output_dir = os.path.join(config.data_dir, "training_metrics", 
@@ -42,6 +52,72 @@ class RobotTrainingMonitor(BaseCallback):
     def _on_training_start(self):
         self.start_time = time.time()
         print(f"Training metrics will be saved to: {self.output_dir}")
+        
+        # Initialize live plot if enabled
+        if self.live_plot:
+            self._setup_live_plot()
+    
+    def _setup_live_plot(self):
+        """Initialize the live plotting figure"""
+        plt.ion()  # Enable interactive mode
+        self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(10, 8))
+        
+        # Reward plot
+        self.ax1.set_title('Training Progress')
+        self.ax1.set_xlabel('Episode')
+        self.ax1.set_ylabel('Reward')
+        self.reward_line, = self.ax1.plot([], [], 'b-', alpha=0.5, label='Episode Reward')
+        self.avg_reward_line, = self.ax1.plot([], [], 'r-', linewidth=2, label='10-ep Avg Reward')
+        self.ax1.legend()
+        self.ax1.grid(True, alpha=0.3)
+        
+        # Distance plot
+        self.ax2.set_title('Distance to Goal')
+        self.ax2.set_xlabel('Episode')
+        self.ax2.set_ylabel('Distance')
+        self.distance_line, = self.ax2.plot([], [], 'g-', linewidth=1.5)
+        self.ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+        
+    def _update_live_plot(self):
+        """Update the live plot with latest data"""
+        if not self.live_plot or self.fig is None:
+            return
+            
+        episodes = list(range(1, len(self.episode_rewards) + 1))
+        
+        # Update reward plots
+        self.reward_line.set_data(episodes, self.episode_rewards)
+        if len(self.rolling_rewards_10) > 0:
+            self.avg_reward_line.set_data(episodes, self.rolling_rewards_10)
+            
+        # Update distance plot if we have distance data
+        if len(self.distances_to_goal) > 0:
+            # We'll plot average distance per episode
+            avg_distances = []
+            episode_start = 0
+            for length in self.episode_lengths:
+                episode_end = episode_start + length
+                if episode_end <= len(self.distances_to_goal):
+                    avg_dist = np.mean(self.distances_to_goal[episode_start:episode_end])
+                    avg_distances.append(avg_dist)
+                episode_start = episode_end
+                
+            if len(avg_distances) > 0:
+                ep_range = list(range(1, len(avg_distances) + 1))
+                self.distance_line.set_data(ep_range, avg_distances)
+        
+        # Adjust plot limits
+        for ax in [self.ax1, self.ax2]:
+            ax.relim()
+            ax.autoscale_view()
+            
+        # Draw the updated figure
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
         
     def _calculate_metrics(self):
         # Calculate rolling averages if we have enough data
@@ -149,8 +225,8 @@ class RobotTrainingMonitor(BaseCallback):
         
         # Extract distance to goal if available in info
         info = self.locals.get("infos")[0]
-        if info and 'distance_to_goal' in info:
-            distance = info['distance_to_goal']
+        if info and 'distance' in info:
+            distance = info['distance']
             # Store for later analysis
             if len(self.distances_to_goal) < self.num_timesteps:
                 self.distances_to_goal.append(distance)
@@ -181,6 +257,10 @@ class RobotTrainingMonitor(BaseCallback):
             print(f"Total steps: {self.num_timesteps}, Steps/sec: {steps_per_second:.1f}")
             print(f"Time elapsed: {elapsed:.1f} seconds\n")
             
+            # Update live plot periodically
+            if self.live_plot and len(self.episode_rewards) % self.live_update_freq == 0:
+                self._update_live_plot()
+            
             # Save metrics periodically
             if len(self.episode_rewards) % self.save_freq == 0:
                 self._save_metrics()
@@ -202,6 +282,11 @@ class RobotTrainingMonitor(BaseCallback):
         # Final metrics and plots
         self._save_metrics()
         self._generate_plots()
+        
+        # Close live plot if it exists
+        if self.live_plot and self.fig is not None:
+            plt.close(self.fig)
+            plt.ioff()  # Turn off interactive mode
         
         # Generate a final summary plot
         plt.figure(figsize=(12, 8))

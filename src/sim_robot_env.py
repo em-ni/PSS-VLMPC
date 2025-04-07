@@ -8,257 +8,178 @@ from sklearn.preprocessing import MinMaxScaler
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import src.config as config
-from src.lstm_model import LSTMModel
+from src.nn_model import VolumeNet
 from tests.test_blob_sampling import generate_surface, sample_point_in_hull, is_inside_hull, load_point_cloud_from_csv
 
 class SimRobotEnv(gym.Env):
     """
-    A simulated robot environment using a pre-trained LSTM model for dynamics.
+    A simulated robot environment using a pre-trained neural network model.
     Observation: 3D coordinates of the simulated tip wrt to the base (shape: 3,)
     Action: A 3D discrete vector representing desired volumes (tau).
-            (NOTE: Modified from RobotEnv's 4D action for clarity, assuming
-             the 4th 'elongation' action is handled externally or incorporated
-             into how the 3 base actions are chosen by the RL agent policy)
-             Alternatively, retain 4D action and map internally as before.
-             Let's retain the 4D action for consistency with original env.
     Reward: Negative Euclidean distance from the simulated tip to the goal.
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, model_path=r"data/exp_2025-04-02_11-43-59/lstm_model.pth"):
+    def __init__(self):
         super(SimRobotEnv, self).__init__()
 
-        # --- Constants ---
-        self.sequence_length = config.sequence_length 
-        self.n_features_tau = config.n_features_tau
-        self.n_features_x = config.n_features_x
-        self.total_features = config.total_features
-        self.output_dim = config.output_dim
-        self.lstm_hidden_units = config.lstm_hidden_units
-        self.lstm_num_layers = config.lstm_num_layers
-
-        # --- Action Space (Consistent with RobotEnv) ---
-        self.action_space = spaces.MultiDiscrete([config.steps] * 4)
-
-        # Mapping from discrete action indices to continuous tau values
-        self.action_mapping = {
-            i: np.linspace(0, config.max_stroke, config.steps) for i in range(4)
-        }
-
-        # --- Observation Space ---
-        # Denormalized relative tip position [x, y, z]
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
-
-        # --- Load Model and Scaler ---
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"SimEnv using device: {self.device}")
-        try:
-            # Load the saved dictionary that contains both model and scaler
-            checkpoint = torch.load(model_path, map_location=self.device)
-            
-            # Create and load the model
-            self.model = LSTMModel(self.total_features, self.lstm_hidden_units, self.output_dim, self.lstm_num_layers)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.model.to(self.device)
-            self.model.eval()  # Set to evaluation mode
-            print(f"Loaded trained LSTM model from {model_path}")
-            
-            # Get the scaler from the same file
-            self.scaler = checkpoint['scaler']
-            print(f"Loaded data scaler from model checkpoint")
-            
-            if not isinstance(self.scaler, MinMaxScaler) or not hasattr(self.scaler, 'n_features_in_'):
-                raise ValueError("Loaded object is not a fitted scikit-learn scaler.")
-            if self.scaler.n_features_in_ != self.total_features:
-                raise ValueError(f"Scaler expected {self.scaler.n_features_in_} features, but environment requires {self.total_features}.")
-        except FileNotFoundError:
-            print(f"Error: Model file not found at {model_path}. SimEnv cannot function.")
-            raise
-        except Exception as e:
-            print(f"Error loading model or scaler: {e}")
-            raise
-
-        # --- Goal and Workspace ---
-        print("Loading point cloud for goal sampling...")
-        # Use the same file path as in RobotEnv or make it configurable
-        point_cloud_file = r"data/exp_2025-04-02_11-43-59/output_exp_2025-04-02_11-43-59.csv"
-        point_cloud = load_point_cloud_from_csv(point_cloud_file)
+        # Load the point cloud from a CSV file and get the mesh 
+        print("Loading point cloud...")
+        file_path = r"data/exp_2025-04-04_19-17-42/output_exp_2025-04-04_19-17-42.csv"  # Change this to your actual CSV file path
+        point_cloud = load_point_cloud_from_csv(file_path)
         self.alpha_shape, self.convex_hull = generate_surface(point_cloud, alpha=1.0)
-        self.goal = np.zeros(3, dtype=np.float32) # Initialized in reset
-
-        # --- Internal State ---
-        self.history_tau_norm = np.zeros((self.sequence_length, self.n_features_tau), dtype=np.float32)
-        self.history_x_norm = np.zeros((self.sequence_length, self.n_features_x), dtype=np.float32)
-        self.current_tip_denorm = np.zeros(3, dtype=np.float32) # Stores the latest denormalized tip pos [x,y,z]
-
-        self.max_steps = 100 # Max steps per episode
+        
+        # Action space: 4 discrete actions (config.steps) for each motor and elongation
+        self.action_space = spaces.MultiDiscrete([config.steps] * 4)
+        self.action_mapping = {
+            # For each dimension, map 0-9 to your desired values
+            0: np.linspace(0, config.max_stroke, config.steps),  # First motor
+            1: np.linspace(0, config.max_stroke, config.steps),  # Second motor
+            2: np.linspace(0, config.max_stroke, config.steps),  # Third motor
+            3: np.linspace(0, config.max_stroke, config.steps),  # Elongation (all motors)
+        }
+        
+        # Observation space: 3D coordinates of the tip wrt to the base (shape: 3,)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
+        
+        self.tip = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        if config.pick_random_goal:
+            self.goal = self.pick_goal()
+        else:
+            self.goal = config.rl_goal
+        self.max_steps = 100
         self.current_step = 0
 
-        # Optional: Keep track of LSTM hidden state if needed for stateful prediction
-        self.lstm_hidden_state = None
+        # Load scalers
+        scalers_path = r"data/exp_2025-04-04_19-17-42/volume_net_scalers.npz"
+        scalers = np.load(scalers_path)
 
-    def _map_action_to_tau(self, action):
-        """Maps the 4D discrete action to 3D continuous tau (volume command)."""
+        # Recreate scalers
+        self.scaler_volumes = MinMaxScaler()
+        self.scaler_volumes.min_ = scalers['volumes_min']
+        self.scaler_volumes.scale_ = scalers['volumes_scale']
+
+        self.scaler_deltas = MinMaxScaler()
+        self.scaler_deltas.min_ = scalers['deltas_min']
+        self.scaler_deltas.scale_ = scalers['deltas_scale']
+
+        # Load model
+        model_path = r"data/exp_2025-04-04_19-17-42/volume_net.pth"
+        self.model = VolumeNet(input_dim=3, output_dim=3)
+        self.model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+        self.model.eval()
+
+
+
+    def get_goal(self):
+        return self.goal
+
+    def pick_goal(self):
+        """
+        Pick a random goal within the workspace.
+        """
+        return sample_point_in_hull(self.convex_hull, num_samples=1)[0]
+
+    def set_goal(self, goal):
+        self.goal = goal
+
+    def step(self, action):
+        # Map discrete actions to continuous values
         mapped_action = np.array([
             self.action_mapping[0][action[0]],
             self.action_mapping[1][action[1]],
             self.action_mapping[2][action[2]],
             self.action_mapping[3][action[3]]
-        ], dtype=np.float32)
-
+        ])
+        
+        # Use mapped_action instead of action
         elongation = mapped_action[3]
+        
+        # Create a new command vector with the first 3 actions adjusted by elongation
         command = np.zeros(3, dtype=np.float32)
         for i in range(3):
+            # Combine each action with elongation, ensuring it stays within bounds
             combined_action = min(mapped_action[i] + elongation, config.max_stroke)
-            command[i] = max(0, combined_action)
-        return command
-
-    def _normalize_features(self, tau=None, x=None):
-        """Normalizes tau or x using the loaded scaler."""
-        # Scaler expects input shape (n_samples, n_features)
-        # n_features = total_features = n_features_tau + n_features_x
-        dummy_input = np.zeros((1, self.total_features))
-        if tau is not None:
-            dummy_input[0, :self.n_features_tau] = tau
-        if x is not None:
-            dummy_input[0, self.n_features_tau:] = x
-
-        scaled_dummy = self.scaler.transform(dummy_input)
-
-        tau_norm = scaled_dummy[0, :self.n_features_tau] if tau is not None else None
-        x_norm = scaled_dummy[0, self.n_features_tau:] if x is not None else None
-
-        if tau is not None and x is not None:
-             return tau_norm, x_norm
-        elif tau is not None:
-             return tau_norm
-        elif x is not None:
-             return x_norm
-        else:
-             return None
-
-    def _denormalize_x(self, x_norm):
-        """Denormalizes predicted x using the loaded scaler."""
-        dummy_input = np.zeros((1, self.total_features))
-        dummy_input[0, self.n_features_tau:] = x_norm
-        denormalized_dummy = self.scaler.inverse_transform(dummy_input)
-        return denormalized_dummy[0, self.n_features_tau:]
-
-    def _update_history(self, tau_norm, x_norm):
-        """Updates the internal history buffers."""
-        # Shift history back by one step
-        self.history_tau_norm = np.roll(self.history_tau_norm, -1, axis=0)
-        self.history_x_norm = np.roll(self.history_x_norm, -1, axis=0)
-        # Add new values at the end
-        self.history_tau_norm[-1, :] = tau_norm
-        self.history_x_norm[-1, :] = x_norm
-
-    def pick_goal(self):
-        """Pick a random goal within the workspace."""
-        print("Picking new random goal...")
-        if self.convex_hull:
-             return sample_point_in_hull(self.convex_hull, num_samples=1)[0]
-        else:
-             print("Warning: No convex hull available, returning default goal.")
-             # Example: return a random point within some reasonable bounds
-             return np.random.uniform(-2, 2, size=3).astype(np.float32)
-
-    def set_goal(self, goal):
-         self.goal = np.array(goal, dtype=np.float32)
-         print(f"Goal set to: {self.goal}")
-
-    def get_goal(self):
-         return self.goal
-
-    def reset(self, *, seed=None, options=None):
-        """Reset the environment to an initial state."""
-        print("Resetting simulated environment...")
-        super().reset(seed=seed)
+            command[i] = max(0, combined_action)  # Ensure non-negative
         
-        # Reset internal state trackers
-        self.current_step = 0
-        self.history_tau_norm = np.zeros((self.sequence_length, self.n_features_tau), dtype=np.float32)
-        self.history_x_norm = np.zeros((self.sequence_length, self.n_features_x), dtype=np.float32)
-        self.current_tip_denorm = np.zeros(3, dtype=np.float32)
+        volumes = np.zeros(3, dtype=np.float32)
+        volumes[0] = config.initial_pos + command[0]
+        volumes[1] = config.initial_pos + command[1] 
+        volumes[2] = config.initial_pos + command[2]
         
-        # Reset LSTM hidden state
-        self.lstm_hidden_state = None
+        # Reshape to 2D array (1 sample, 3 features) for scikit-learn
+        volumes_2d = volumes.reshape(1, -1)
         
-        # Pick a new goal with some probability, similar to RobotEnv
-        if config.pick_random_goal:
-            # Change goal with 40% probability, matching RobotEnv
-            if np.random.random() < 0.4:
-                self.goal = self.pick_goal()
-                print(f"Setting new goal at {self.goal}")
-        
-        # Return observation and empty info dict
-        return self.current_tip_denorm.copy(), {}
+        # Scale inputs
+        volumes_scaled = self.scaler_volumes.transform(volumes_2d)
 
-    def step(self, action):
-        """Execute one step in the environment."""
-        # 1. Map discrete action -> continuous tau command
-        tau_t_plus_1 = self._map_action_to_tau(action) # This is the command for the *next* step
+        # Convert to tensor
+        volumes_tensor = torch.tensor(volumes_scaled, dtype=torch.float32)
 
-        # 2. Normalize the command
-        tau_t_plus_1_norm = self._normalize_features(tau=tau_t_plus_1)
-
-        # 3. Prepare LSTM input sequence
-        # Input: (tau_t, tau_t-1, tau_t-2, tau_t-3, x_t-1, x_t-2, x_t-3)
-        sequence = np.column_stack((self.history_tau_norm, self.history_x_norm))
-        sequence_tensor = torch.FloatTensor(sequence).unsqueeze(0).to(self.device)
-
-        # 4. Predict delta_x using the LSTM model
+        # Make predictions
         with torch.no_grad():
-            predicted_x_norm = self.model(sequence_tensor)
-            predicted_x_norm = predicted_x_norm[0, -1].cpu().numpy()  # Get last prediction
+            predictions_scaled = self.model(volumes_tensor).numpy()
 
-        # 5. Denormalize prediction to get actual delta_x
-        delta_x_denorm = self._denormalize_x(predicted_x_norm)
+        # Inverse transform predictions
+        predictions = self.scaler_deltas.inverse_transform(predictions_scaled)
+        self.tip = predictions[0]  
+        distance = np.linalg.norm(self.tip - self.goal)
+        terminated = False
+        self.current_step += 1
+        reward = 0
+        reward = -distance  
 
-        # 6. Update the current tip position
-        self.current_tip_denorm = delta_x_denorm  # Replace with absolute position (like RobotEnv)
-
-        # 7. Update history with new values
-        self._update_history(tau_t_plus_1_norm, predicted_x_norm)
-
-        # 8. Calculate distance and reward 
-        distance = np.linalg.norm(self.current_tip_denorm - self.goal)
-        reward = -distance 
+        ## Old way
+        # distance_threshold = 1.9
         
-        # # Similar reward logic to RobotEnv
+        # if distance > distance_threshold:
+        #     # terminated = True
+        #     # reward = 0
+        #     reward -= 1  # Negative reward for being too far from the goal
+        # bonus = 0
+
+        # # Check 3d points alignment with the goal
+        # # Compute perpendicular distance from goal to the line defined by the origin and the tip.
+        # dist_to_line = np.linalg.norm(np.cross(self.tip, self.goal)) / np.linalg.norm(self.tip)
+
+        # # If the goal lies nearly on the line, add a bonus reward.
+        # if dist_to_line < 0.7 and np.linalg.norm(self.goal) > np.linalg.norm(self.tip):
+        #     bonus += 5
+        #     if distance < 0.5:
+        #         bonus += 10
+        #         if distance < 0.2:
+        #             bonus += 20
+        #             if distance < 0.1:
+        #                 bonus += 50
+
+        # if not terminated:
+        #     # reward = 1/(distance*(self.current_step**2)) + bonus
+        #     reward = 1/(0.5*distance+0.0001) + bonus
+
+        ## New way
         # if distance < 0.65:
         #     reward += 1
         #     self.goal = self.pick_goal()
-        #     # print(f"Setting new goal at {self.goal}")
+        #     print(f"Setting new goal at {self.goal}")
 
-        # 9. Update step counter and check termination
-        self.current_step += 1
-        terminated = False  # Only terminate if we hit max steps
-        truncated = self.current_step >= self.max_steps
-        
-        # print(f"Step {self.current_step}: Distance {distance}")
-        
-        # 10. Return observation, reward, done flags, and info
-        observation = self.current_tip_denorm.copy()
-        info = {
-            'distance': distance,
-            'goal': self.goal,
-            'step': self.current_step
-        }
+        print(f"Step {self.current_step}: Distance {distance} ")
+        truncated = self.current_step >= self.max_steps  # episode timeout
+        info = {"step": self.current_step, "distance": distance}
 
-        return observation, reward, terminated, truncated, info
+
+        return self.tip, reward, terminated, truncated, info
+    
+    def reset(self, *, seed=None, options=None):
+        print("Resetting environment...")
+        super().reset(seed=seed)
+        self.current_step = 0
+
+        if config.pick_random_goal:
+            # Change goal with 20% probability.
+            if np.random.random() < 0.4:
+                self.goal = self.pick_goal()
+                print(f"Setting new goal at {self.goal}")
+        return self.tip, {}
 
     def render(self, mode='human'):
-        """
-        Render the environment. In simulation, we could add matplotlib visualization.
-        For consistency with the real environment, this is a placeholder.
-        """
-        # For actual visualization, you could add:
-        if mode == 'human' and hasattr(self, 'fig'):
-            plt.figure(self.fig)
-            plt.plot([0, self.current_tip_denorm[0]], 
-                     [0, self.current_tip_denorm[1]], 
-                     [0, self.current_tip_denorm[2]], 'r-')
-            plt.plot(self.goal[0], self.goal[1], self.goal[2], 'go')
-            plt.draw()
-            plt.pause(0.01)
+        pass

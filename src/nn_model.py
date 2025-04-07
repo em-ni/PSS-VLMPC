@@ -1,9 +1,9 @@
 import torch.nn as nn
 
 # Define a neural network for pressure prediction.
-class PressureNet(nn.Module):
+class VolumeNet(nn.Module):
     def __init__(self, input_dim=3, output_dim=3):
-        super(PressureNet, self).__init__()
+        super(VolumeNet, self).__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, 64),
             nn.ReLU(),

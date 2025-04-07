@@ -1,379 +1,361 @@
-#!/usr/bin/env python
 import os
-import glob
 import argparse
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing._data import StandardScaler
-import cv2
-import yaml
+from torch.utils.data import DataLoader, TensorDataset, random_split
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
+from src.nn_model import VolumeNet
 import time
-from zaber_motion import Units
-from zaber_motion.ascii import Connection
-from src.nn_model import PressureNet
-from src import config
+import json
 
-# Common functions
-def load_model(model_path):
-    """Load a trained model and its scalers"""
-    # Allow StandardScaler during unpickling
-    allowed_globals = {"sklearn.preprocessing._data.StandardScaler": StandardScaler}
-    with torch.serialization.safe_globals(allowed_globals):
-        checkpoint = torch.load(model_path, map_location=torch.device('cpu'), weights_only=False)
-    
-    model = PressureNet(input_dim=3, output_dim=config.output_dim)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
-    input_scaler = checkpoint["input_scaler"]
-    output_scaler = checkpoint["output_scaler"]
-    return model, input_scaler, output_scaler
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train or test a neural network model")
+    parser.add_argument("--mode", type=str, choices=["train", "test"], required=True,
+                        help="Run in training or testing mode")
+    parser.add_argument("--experiment_folder", type=str, 
+                        help="Path to the experiment folder containing output CSV")
+    parser.add_argument("--model_path", type=str, default="models/volume_net.pth",
+                        help="Path to save or load the model")
+    parser.add_argument("--batch_size", type=int, default=32,
+                        help="Batch size for training")
+    parser.add_argument("--epochs", type=int, default=500,
+                        help="Number of epochs for training")
+    parser.add_argument("--lr", type=float, default=0.001,
+                        help="Learning rate")
+    parser.add_argument("--val_split", type=float, default=0.2,
+                        help="Validation split ratio")
+    parser.add_argument("--early_stopping", type=int, default=50,
+                        help="Early stopping patience")
+    return parser.parse_args()
 
-# Training-specific functions
-def load_data(csv_path):
-    """
-    Load the CSV file, drop rows with missing values, and compute differences (tip - base)
-    Expected CSV columns:
-      timestamp, volume_1, volume_2, volume_3, pressure_1, pressure_2, pressure_3,
-      img_left, img_right, tip_x, tip_y, tip_z, base_x, base_y, base_z.
-    """
+def load_and_preprocess_data(csv_path):
+    """Load the CSV data and preprocess it for the neural network"""
+    print(f"Loading data from {csv_path}")
     df = pd.read_csv(csv_path)
-    df.dropna(inplace=True)
-    # Compute differences
-    df['dx'] = df['tip_x'] - df['base_x']
-    df['dy'] = df['tip_y'] - df['base_y']
-    df['dz'] = df['tip_z'] - df['base_z']
-    X = df[['dx', 'dy', 'dz']].values
-    if config.pressure_only:
-        y = df[['pressure_1', 'pressure_2', 'pressure_3']].values
-    else:
-        y = df[['volume_1', 'volume_2', 'volume_3', 'pressure_1', 'pressure_2', 'pressure_3']].values
-    return X, y
-
-# Testing-specific functions
-def move_axis(axis, position):
-    """Move a motor axis to a specific position"""
-    axis.move_absolute(float(position), Units.LENGTH_MILLIMETRES, False)
-    time.sleep(0.1)
-
-def load_projection_matrix(yaml_path):
-    """Load camera projection matrix from a YAML file"""
-    with open(yaml_path, "r") as f:
-        data = yaml.safe_load(f)
-    P = np.array(data["projection_matrix"], dtype=np.float64)
-    return P
-
-def detect_base(frame):
-    """
-    Input: frame - Image from the camera
-    Output: x,y - Average coordinates of the base of the robot
-    """
-    # Transform the image to hsv
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    # Make mask for yellow color
-    mask_yellow = cv2.inRange(hsv, config.lower_yellow, config.upper_yellow)
     
-    # Find contours in the mask.
-    contours, _ = cv2.findContours(mask_yellow, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if len(contours) == 0:
-        print("No yellow base detected.")
-        return None
+    # Extract volumes (inputs)
+    volumes = df[['volume_1', 'volume_2', 'volume_3']].values
     
-    # Choose the largest contour.
-    c = max(contours, key=cv2.contourArea)
-    M = cv2.moments(c)
-    if M["m00"] == 0:
-        return None
-    cx = float(M["m10"] / M["m00"])
-    cy = float(M["m01"] / M["m00"])
+    # Calculate tip-base difference (outputs)
+    df['delta_x'] = df['tip_x'] - df['base_x']
+    df['delta_y'] = df['tip_y'] - df['base_y']
+    df['delta_z'] = df['tip_z'] - df['base_z']
+    deltas = df[['delta_x', 'delta_y', 'delta_z']].values
+    
+    # Scale inputs to [0, 1] range
+    scaler_volumes = MinMaxScaler(feature_range=(0, 1))
+    volumes_scaled = scaler_volumes.fit_transform(volumes)
+    
+    # Scale outputs to [-1, 1] range
+    scaler_deltas = MinMaxScaler(feature_range=(-1, 1))
+    deltas_scaled = scaler_deltas.fit_transform(deltas)
+    
+    return volumes_scaled, deltas_scaled, scaler_volumes, scaler_deltas
 
-    return cx, cy
-
-def detect_target(frame):
-    """
-    Input: frame - Image from the camera
-    Output: x,y - Average coordinates of the green target in the frame
-    """
-    # Transform the image to hsv
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    # Make mask for green color using config values
-    mask_green = cv2.inRange(hsv, config.lower_green, config.upper_green)
-
-    # Find contours in the mask.
-    contours, _ = cv2.findContours(mask_green, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if len(contours) == 0:
-        print("No green target detected.")
-        return None
-
-    # Choose the largest contour.
-    c = max(contours, key=cv2.contourArea)
-    M = cv2.moments(c)
-    if M["m00"] == 0:
-        return None
-    cx = float(M["m10"] / M["m00"])
-    cy = float(M["m01"] / M["m00"])
-    return cx, cy
-
-def triangulate_target(img_left, img_right, P_left_matrix, P_right_matrix, target='base'):
-    """
-    Input: img_left - Image from left camera
-           img_right - Image from right camera
-    Output: x,y,z - Coordinates of the target in 3D space
-    """
-    if target == 'base':
-        # Get base points from the images.
-        target_left = detect_base(img_left)
-        target_right = detect_base(img_right)
-    elif target == 'target':
-        # Get target points from the images.
-        target_left = detect_target(img_left)
-        target_right = detect_target(img_right)
-
-    if target_left is None or target_right is None:
-        print("Couldn't detect the target in one or both images.")
-        return None
-
-    # Convert the points to a 2x1 array required by cv2.triangulatePoints.
-    target_left = np.array([[target_left[0]], [target_left[1]]], dtype=np.float32)
-    target_right = np.array([[target_right[0]], [target_right[1]]], dtype=np.float32)
-
-    # Triangulate the target point.
-    target_4d = cv2.triangulatePoints(P_left_matrix, P_right_matrix, target_left, target_right)
-
-    # Convert from homogeneous coordinates to 3D.
-    target_3d = target_4d[:3] / target_4d[3]
-
-    return target_3d
+def create_datasets(volumes, deltas, val_split=0.2):
+    """Create PyTorch datasets and dataloaders"""
+    # Convert to PyTorch tensors
+    X_tensor = torch.tensor(volumes, dtype=torch.float32)
+    y_tensor = torch.tensor(deltas, dtype=torch.float32)
+    
+    # Create dataset
+    dataset = TensorDataset(X_tensor, y_tensor)
+    
+    # Split into train and validation
+    val_size = int(len(dataset) * val_split)
+    train_size = len(dataset) - val_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    
+    return train_dataset, val_dataset
 
 def train_model(args):
     """Train the neural network model"""
-    # Find CSV file(s) starting with 'output' in the experiment folder.
-    csv_files = glob.glob(os.path.join(args.experiment_folder, "output*.csv"))
-    if not csv_files:
-        raise FileNotFoundError("No CSV file starting with 'output' found.")
-    csv_path = csv_files[0]
+    print("Training neural network...")
     
-    # Load and split data.
-    X, y = load_data(csv_path)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)
+    # Find CSV file in experiment folder
+    if args.experiment_folder:
+        csv_files = [f for f in os.listdir(args.experiment_folder) if f.endswith('.csv')]
+        if not csv_files:
+            print(f"Error: No CSV files found in {args.experiment_folder}")
+            return
+        csv_path = os.path.join(args.experiment_folder, csv_files[0])
+    else:
+        print("Error: Please provide an experiment folder with --experiment_folder")
+        return
     
-    # Scale inputs and outputs.
-    input_scaler = StandardScaler()
-    X_train_scaled = input_scaler.fit_transform(X_train)
-    X_test_scaled = input_scaler.transform(X_test)
+    # Load and preprocess data
+    volumes, deltas, scaler_volumes, scaler_deltas = load_and_preprocess_data(csv_path)
     
-    output_scaler = StandardScaler()
-    y_train_scaled = output_scaler.fit_transform(y_train)
-    y_test_scaled = output_scaler.transform(y_test)
+    # Create datasets and dataloaders
+    train_dataset, val_dataset = create_datasets(volumes, deltas, args.val_split)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
     
-    # Convert to torch tensors.
-    train_X = torch.tensor(X_train_scaled, dtype=torch.float32)
-    train_y = torch.tensor(y_train_scaled, dtype=torch.float32)
-    test_X = torch.tensor(X_test_scaled, dtype=torch.float32)
-    test_y = torch.tensor(y_test_scaled, dtype=torch.float32)
-    
-    # Create DataLoader.
-    train_dataset = torch.utils.data.TensorDataset(train_X, train_y)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    
-    # Initialize model, loss, optimizer.
-    model = PressureNet(input_dim=3, output_dim=config.output_dim)
+    # Initialize model, loss, optimizer
+    model = VolumeNet(input_dim=3, output_dim=3)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     
-    loss_history = []
-    print("Training neural network...")
+    # For early stopping
+    best_val_loss = float('inf')
+    patience_counter = 0
+    best_model = None
+    
+    # For plotting
+    train_losses = []
+    val_losses = []
+    
+    # Training loop
     for epoch in range(args.epochs):
+        # Training
         model.train()
-        epoch_loss = 0.0
-        for batch_X, batch_y in train_loader:
+        train_loss = 0.0
+        for batch_x, batch_y in train_loader:
             optimizer.zero_grad()
-            preds = model(batch_X)
+            preds = model(batch_x)
             loss = criterion(preds, batch_y)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item() * batch_X.size(0)
-        epoch_loss /= len(train_dataset)
-        loss_history.append(epoch_loss)
-        print(f"Epoch {epoch+1}/{args.epochs}: Loss = {epoch_loss:.4f}")
+            train_loss += loss.item() * batch_x.size(0)
+        
+        train_loss /= len(train_loader.dataset)
+        train_losses.append(train_loss)
+        
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch_x, batch_y in val_loader:
+                preds = model(batch_x)
+                loss = criterion(preds, batch_y)
+                val_loss += loss.item() * batch_x.size(0)
+        
+        val_loss /= len(val_loader.dataset)
+        val_losses.append(val_loss)
+        
+        # Print progress
+        print(f"Epoch {epoch+1}/{args.epochs} - "
+              f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}")
+        
+        # Early stopping check
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            best_model = model.state_dict().copy()
+        else:
+            patience_counter += 1
+            
+        if patience_counter >= args.early_stopping:
+            print(f"Early stopping triggered after {epoch+1} epochs")
+            break
     
-    # Plot training loss.
-    plt.figure(figsize=(8,5))
-    plt.plot(loss_history, marker='o')
-    plt.xlabel("Epoch")
-    plt.ylabel("MSE Loss")
-    plt.title("Training Loss")
-    plt.savefig(os.path.join(args.experiment_folder, "training_loss_nn.png"))
-    plt.close()
-
-    # Evaluate on test set for creating predicted vs actual scatter plot.
-    model.eval()
-    with torch.no_grad():
-        preds = model(test_X)
-    preds_np = preds.cpu().numpy()
-    # Inverse-transform predictions and true labels to original scale.
-    preds_unscaled = output_scaler.inverse_transform(preds_np)
-    test_y_unscaled = output_scaler.inverse_transform(test_y.cpu().numpy())
-
-    # Create scatter plots for each output dimension.
-    if config.output_dim == 1:
-        fig, axes = plt.subplots(1, 1, figsize=(5, 5))
-        axes = [axes]
-    else:
-        fig, axes = plt.subplots(1, config.output_dim, figsize=(5 * config.output_dim, 5))
-    task_names = ["Pressure 1", "Pressure 2", "Pressure 3"] if config.pressure_only \
-                 else ["Volume 1", "Volume 2", "Volume 3", "Pressure 1", "Pressure 2", "Pressure 3"]
-    for i in range(config.output_dim):
-        axes[i].scatter(test_y_unscaled[:, i], preds_unscaled[:, i], alpha=0.7)
-        min_val = min(test_y_unscaled[:, i].min(), preds_unscaled[:, i].min())
-        max_val = max(test_y_unscaled[:, i].max(), preds_unscaled[:, i].max())
-        axes[i].plot([min_val, max_val], [min_val, max_val], 'r--')
-        axes[i].set_xlim([min_val, max_val])
-        axes[i].set_ylim([min_val, max_val])
-        axes[i].set_xlabel("Actual")
-        axes[i].set_ylabel("Predicted")
-        axes[i].set_title(task_names[i])
-    plt.suptitle("Predicted vs Actual Values on Test Set")
-    scatter_plot_path = os.path.join(args.experiment_folder, "predicted_vs_actual_nn.png")
-    plt.savefig(scatter_plot_path)
-    plt.close()
-    print(f"Predicted vs Actual plot saved to {scatter_plot_path}")
+    # Load best model
+    model.load_state_dict(best_model)
     
-    with torch.no_grad():
-        test_preds = model(test_X)
-        test_loss = criterion(test_preds, test_y).item()
-    test_preds_np = test_preds.cpu().numpy()
-    # Inverse transform predictions and ground truth.
-    test_preds_unscaled = output_scaler.inverse_transform(test_preds_np)
-    test_y_unscaled = output_scaler.inverse_transform(test_y.cpu().numpy())
-    mse_unscaled = np.mean((test_preds_unscaled - test_y_unscaled) ** 2)
-    print(f"Test MSE (unscaled): {mse_unscaled:.4f}")
+    # Save model
+    torch.save(model.state_dict(), args.experiment_folder)
+    print(f"Model saved to {args.experiment_folder}")
     
-    # Save model and scalers.
-    checkpoint = {
-        "model_state_dict": model.state_dict(),
-        "input_scaler": input_scaler,
-        "output_scaler": output_scaler,
+    # Save scalers
+    scalers_path = os.path.join(os.path.dirname(args.experiment_folder), "volume_net_scalers.npz")
+    np.savez(scalers_path, 
+             volumes_min=scaler_volumes.min_, volumes_scale=scaler_volumes.scale_,
+             deltas_min=scaler_deltas.min_, deltas_scale=scaler_deltas.scale_)
+    print(f"Scalers saved to {scalers_path}")
+    
+    # Save training history
+    history = {
+        "train_loss": train_losses,
+        "val_loss": val_losses
     }
-    save_path = os.path.join(args.experiment_folder, "nn_model.pth")
-    torch.save(checkpoint, save_path)
-    print(f"Model saved to {save_path}")
+    history_path = os.path.join(os.path.dirname(args.experiment_folder), "volume_net_history.json")
+    with open(history_path, 'w') as f:
+        json.dump(history, f)
+    
+    # Plot results
+    plot_training_results(train_losses, val_losses, args.model_path)
+    
+    # Evaluate on validation set
+    evaluate_model(model, val_loader, scaler_volumes, scaler_deltas)
+
+def evaluate_model(model, dataloader, scaler_volumes, scaler_deltas):
+    """Evaluate the model and visualize predictions"""
+    model.eval()
+    
+    # Get all validation data
+    all_inputs = []
+    all_targets = []
+    all_preds = []
+    
+    with torch.no_grad():
+        for inputs, targets in dataloader:
+            preds = model(inputs)
+            
+            all_inputs.append(inputs.numpy())
+            all_targets.append(targets.numpy())
+            all_preds.append(preds.numpy())
+    
+    # Concatenate batches
+    all_inputs = np.concatenate(all_inputs)
+    all_targets = np.concatenate(all_targets)
+    all_preds = np.concatenate(all_preds)
+    
+    # Inverse transform to original scale
+    inputs_orig = scaler_volumes.inverse_transform(all_inputs)
+    targets_orig = scaler_deltas.inverse_transform(all_targets)
+    preds_orig = scaler_deltas.inverse_transform(all_preds)
+    
+    # Calculate errors
+    mse = np.mean((preds_orig - targets_orig)**2)
+    mae = np.mean(np.abs(preds_orig - targets_orig))
+    rmse = np.sqrt(mse)
+    
+    print("\nValidation Metrics:")
+    print(f"MSE: {mse:.6f}")
+    print(f"MAE: {mae:.6f}")
+    print(f"RMSE: {rmse:.6f}")
+    
+    # Plot actual vs predicted for each dimension
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    dimensions = ['X', 'Y', 'Z']
+    
+    for i, ax in enumerate(axes):
+        ax.scatter(targets_orig[:, i], preds_orig[:, i], alpha=0.5)
+        
+        # Add perfect prediction line
+        min_val = min(targets_orig[:, i].min(), preds_orig[:, i].min())
+        max_val = max(targets_orig[:, i].max(), preds_orig[:, i].max())
+        ax.plot([min_val, max_val], [min_val, max_val], 'r--')
+        
+        ax.set_xlabel(f'Actual Delta {dimensions[i]}')
+        ax.set_ylabel(f'Predicted Delta {dimensions[i]}')
+        ax.set_title(f'Delta {dimensions[i]} Prediction')
+        ax.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig('models/validation_predictions.png')
+    plt.close()
+
+def plot_training_results(train_losses, val_losses, model_path):
+    """Plot training and validation losses"""
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_losses, label='Training Loss')
+    plt.plot(val_losses, label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    # Save plot
+    plot_path = os.path.join(os.path.dirname(model_path), "training_loss.png")
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"Training plot saved to {plot_path}")
 
 def test_model(args):
-    """Test the neural network model"""
-    model, input_scaler, output_scaler = load_model(args.model_path)
+    """Test the trained model on new data"""
+    print("Testing neural network...")
     
-    # Load the projection matrices
-    P_left = load_projection_matrix(config.P_left_yaml)
-    P_right = load_projection_matrix(config.P_right_yaml)
-
-    # Open connection on COM3
-    connection = Connection.open_serial_port('COM3')
-    connection.enable_alerts()
-
-    # connection.enableAlerts()  # (commented out as in MATLAB)
-    device_list = connection.detect_devices()
-    print("Found {} devices.".format(len(device_list)))
-    print(device_list)
-
-    # Get the axis
-    base_rightaxis_1 = device_list[0].get_axis(1)
-    base_rightaxis_2 = device_list[1].get_axis(1)
-    base_rightaxis_3 = device_list[2].get_axis(1)
-
-    while True:
-        input("Move the target and press Enter when ready to predict...")
-        try:
-            # Take images from both cameras
-            cap_left = cv2.VideoCapture(config.cam_left_index, cv2.CAP_DSHOW)
-            ret_left, frame_left = cap_left.read()
-            cap_left.release()
-
-            cap_right = cv2.VideoCapture(config.cam_right_index, cv2.CAP_DSHOW)
-            ret_right, frame_right = cap_right.read()
-            cap_right.release()
-
-            if not ret_left or not ret_right:
-                print("Error: Could not read frames from cameras.")
-                return
-            
-            # Detect the target in the images
-            base_3d = triangulate_target(frame_left, frame_right, P_left, P_right, target='base')
-            target_3d = triangulate_target(frame_left, frame_right, P_left, P_right, target='target')
-            if base_3d is None or target_3d is None:
-                print("Couldn't triangulate the target.")
-                return
-            
-            dx = target_3d[0][0] - base_3d[0][0]
-            dy = target_3d[1][0] - base_3d[1][0]
-            dz = target_3d[2][0] - base_3d[2][0]
-            
-        except ValueError:
-            print("Invalid input, please enter numeric values.")
+    # Check if model exists
+    if not os.path.exists(args.model_path):
+        print(f"Error: Model not found at {args.model_path}")
+        return
+    
+    # Load scalers
+    scalers_path = os.path.join(os.path.dirname(args.model_path), "volume_net_scalers.npz")
+    if not os.path.exists(scalers_path):
+        print(f"Error: Scalers not found at {scalers_path}")
+        return
+    
+    scalers = np.load(scalers_path)
+    
+    # Recreate scalers
+    scaler_volumes = MinMaxScaler()
+    scaler_volumes.min_ = scalers['volumes_min']
+    scaler_volumes.scale_ = scalers['volumes_scale']
+    
+    scaler_deltas = MinMaxScaler()
+    scaler_deltas.min_ = scalers['deltas_min']
+    scaler_deltas.scale_ = scalers['deltas_scale']
+    
+    # Load model
+    model = VolumeNet(input_dim=3, output_dim=3)
+    model.load_state_dict(torch.load(args.model_path))
+    model.eval()
+    
+    # Find CSV file in experiment folder for testing
+    if args.experiment_folder:
+        csv_files = [f for f in os.listdir(args.experiment_folder) if f.endswith('.csv')]
+        if not csv_files:
+            print(f"Error: No CSV files found in {args.experiment_folder}")
             return
-        
-        input_array = np.array([[dx, dy, dz]])
-        input_scaled = input_scaler.transform(input_array)
-        input_tensor = torch.tensor(input_scaled, dtype=torch.float32)
-        
-        with torch.no_grad():
-            pred = model(input_tensor)
-        
-        pred_np = pred.cpu().numpy()
-        # Inverse transform predictions to original scale.
-        pred_unscaled = output_scaler.inverse_transform(pred_np)
-        pred_unscaled = pred_unscaled.flatten()
-        
-        if config.pressure_only:
-            print("\nPredicted Pressure Values:")
-            print(f"Pressure 1: {pred_unscaled[0]:.3f}")
-            print(f"Pressure 2: {pred_unscaled[1]:.3f}")
-            print(f"Pressure 3: {pred_unscaled[2]:.3f}")
-        else:
-            print("\nPredicted Values:")
-            print(f"Volume 1: {pred_unscaled[0]:.3f}")
-            print(f"Volume 2: {pred_unscaled[1]:.3f}")
-            print(f"Volume 3: {pred_unscaled[2]:.3f}")
-            print(f"Pressure 1: {pred_unscaled[3]:.3f}")
-            print(f"Pressure 2: {pred_unscaled[4]:.3f}")
-            print(f"Pressure 3: {pred_unscaled[5]:.3f}")
-
-        # Move the axis to the predicted position
-        move_axis(base_rightaxis_1, pred_unscaled[0])
-        move_axis(base_rightaxis_2, pred_unscaled[1])
-        move_axis(base_rightaxis_3, pred_unscaled[2])
+        csv_path = os.path.join(args.experiment_folder, csv_files[0])
+    else:
+        print("Error: Please provide an experiment folder with --experiment_folder")
+        return
+    
+    # Load test data
+    df = pd.read_csv(csv_path)
+    volumes = df[['volume_1', 'volume_2', 'volume_3']].values
+    
+    # Calculate actual tip-base differences
+    df['delta_x'] = df['tip_x'] - df['base_x']
+    df['delta_y'] = df['tip_y'] - df['base_y']
+    df['delta_z'] = df['tip_z'] - df['base_z']
+    actual_deltas = df[['delta_x', 'delta_y', 'delta_z']].values
+    
+    # Scale inputs
+    volumes_scaled = scaler_volumes.transform(volumes)
+    
+    # Convert to tensor
+    volumes_tensor = torch.tensor(volumes_scaled, dtype=torch.float32)
+    
+    # Make predictions
+    with torch.no_grad():
+        predictions_scaled = model(volumes_tensor).numpy()
+    
+    # Inverse transform predictions
+    predictions = scaler_deltas.inverse_transform(predictions_scaled)
+    
+    # Calculate errors
+    mse = np.mean((predictions - actual_deltas)**2)
+    mae = np.mean(np.abs(predictions - actual_deltas))
+    rmse = np.sqrt(mse)
+    
+    print("\nTest Metrics:")
+    print(f"MSE: {mse:.6f}")
+    print(f"MAE: {mae:.6f}")
+    print(f"RMSE: {rmse:.6f}")
+    
+    # Plot predictions vs actual
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    dimensions = ['X', 'Y', 'Z']
+    
+    for i, ax in enumerate(axes):
+        ax.plot(actual_deltas[:, i], label='Actual', alpha=0.7)
+        ax.plot(predictions[:, i], label='Predicted', alpha=0.7)
+        ax.set_title(f'Delta {dimensions[i]} Prediction')
+        ax.set_xlabel('Sample')
+        ax.set_ylabel(f'Delta {dimensions[i]}')
+        ax.legend()
+        ax.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig('models/test_predictions.png')
+    print("Test predictions plot saved to models/test_predictions.png")
+    plt.show()
 
 def main():
-    """Main function to handle command line arguments and execute appropriate mode"""
-    parser = argparse.ArgumentParser(description="Train or test neural network for pressure prediction")
-    parser.add_argument("mode", choices=["train", "test"], help="Mode: train or test")
+    args = parse_args()
     
-    # Add arguments for both modes
-    parser.add_argument("--experiment_folder", type=str, help="Path to data folder (for train mode)")
-    parser.add_argument("--model_path", type=str, help="Path to the saved model checkpoint (required for test mode)")
-    
-    # Training-specific arguments
-    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    
-    args = parser.parse_args()
-    
-    # Validate arguments based on mode
     if args.mode == "train":
-        if not args.experiment_folder:
-            parser.error("--experiment_folder is required for train mode")
         train_model(args)
-    else:  # args.mode == "test"
-        if not args.model_path:
-            parser.error("--model_path is required for test mode")
+    elif args.mode == "test":
         test_model(args)
 
 if __name__ == "__main__":

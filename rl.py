@@ -22,14 +22,22 @@ if __name__ == '__main__':
                         help="Path to the trained policy model (required for test mode, optional for train mode)")
     parser.add_argument("--sim", action="store_true", 
                         help="Use simulated environment instead of real robot")
+    # parser.add_argument("--nn_path", type=str,
+    #                     help="Path to the neural network model (required when --sim is used)")
+    # parser.add_argument("--csv_path", type=str,
+    #                     help="Path to the CSV file with collected data")
     args = parser.parse_args()
 
     # Validate that model_path is provided when mode is test
     if args.mode == "test" and not args.model_path:
         parser.error("--model_path is required when mode is test")
+        
+    # # Validate that nn_path is provided when sim is used
+    # if args.sim and not args.nn_path:
+    #     parser.error("--nn_path is required when using simulation (--sim)")
 
     if args.sim:
-        # Create a simulated environment.
+        # Create a simulated environment with the neural network model
         print("Using simulated environment")
         env = SimRobotEnv()
 
@@ -51,8 +59,8 @@ if __name__ == '__main__':
     # Function to run RL training and evaluation.
     def train(env=env):
         # Determine algorithm type
-        # algorithm = "A2C"  
-        algorithm = TRPO
+        algorithm = "A2C"  
+        # algorithm = TRPO
         
         if args.model_path and "trpo" in args.model_path.lower():
             algorithm = "TRPO"
@@ -97,7 +105,7 @@ if __name__ == '__main__':
         metrics_callback = RobotTrainingMonitor()
         
         # Use both callbacks during training
-        model.learn(total_timesteps=3000000, callback=[metrics_callback, checkpoint_callback])
+        model.learn(total_timesteps=1000000, callback=[metrics_callback, checkpoint_callback])
         
         print("\n--- Training complete. Starting evaluation ---")
 
@@ -125,7 +133,7 @@ if __name__ == '__main__':
         print(f"Average reward: {total_reward/eval_episodes:.4f}")
 
         # Save the trained policy to a file.
-        model.save(os.path.join(config.data_dir, "trained_policy.zip"))
+        model.save(os.path.join(config.data_dir, "policy", "trained_policy.zip"))
         os.kill(os.getpid(), signal.SIGTERM)
         return model
     

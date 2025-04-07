@@ -7,7 +7,7 @@ close all
 % Since the file does not contain header names, we read it without variable names.
 exp_name = "../data/exp_2025-04-04_19-17-42/";
 data = load(exp_name + "maintable.mat");
-data = data.outputexp20250404191742;
+data = data.outputexp20250311120139;
 
 % The CSV columns are assumed as follows:
 % Col1: Timestamp
