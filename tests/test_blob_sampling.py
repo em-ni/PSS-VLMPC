@@ -61,10 +61,6 @@ if __name__ == "__main__":
     # Create a PyVista plotter
     plotter = pv.Plotter()
 
-    # Add the original points to the plot
-    point_cloud_pv = pv.PolyData(point_cloud)
-    plotter.add_mesh(point_cloud_pv, color="red", point_size=5, render_points_as_spheres=True, label="Points")
-
     # Add convex hull to the plot
     hull_points = convex_hull.points
     hull_faces = np.column_stack((np.ones(len(convex_hull.simplices), dtype=int) * 3, 
@@ -92,12 +88,20 @@ if __name__ == "__main__":
             surface = cloud.delaunay_3d().extract_surface()
             plotter.add_mesh(surface, color="blue", opacity=0.5, label="Alpha Shape")
 
+    # Sample points inside the hull
+    sampled_points = sample_point_in_hull(convex_hull, num_samples=1000)
+    print("Sampled Points:", sampled_points)
+
+    # Add sampled points to the plot
+    sampled_points_pv = pv.PolyData(sampled_points)
+    plotter.add_mesh(sampled_points_pv, color="blue", point_size=5, render_points_as_spheres=True, label="Sampled Points")
+
+    # # Add the original points to the plot
+    point_cloud_pv = pv.PolyData(point_cloud)
+    plotter.add_mesh(point_cloud_pv, color="red", point_size=5, render_points_as_spheres=True, label="Points")
+
     # Add a legend
     plotter.add_legend()
 
     # Display the plot
     plotter.show()
-    
-    # Sample points inside the hull
-    sampled_points = sample_point_in_hull(convex_hull, num_samples=1000)
-    print("Sampled Points:", sampled_points)

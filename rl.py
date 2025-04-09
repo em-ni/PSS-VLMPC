@@ -59,11 +59,17 @@ if __name__ == '__main__':
     # Function to run RL training and evaluation.
     def train(env=env):
         # Determine algorithm type
-        algorithm = "A2C"  
-        # algorithm = TRPO
+        # algorithm = "A2C"  
+        algorithm = "TRPO"
+        # algorithm = "PPO" 
         
-        if args.model_path and "trpo" in args.model_path.lower():
-            algorithm = "TRPO"
+        # Detect algorithm from model path if provided
+        if args.model_path:
+            if "trpo" in args.model_path.lower():
+                algorithm = "TRPO"
+            elif "a2c" in args.model_path.lower():
+                algorithm = "A2C"
+            # Otherwise keep PPO as default
         
         # Initialize the model or load from checkpoint if provided
         if args.model_path and os.path.exists(args.model_path):
@@ -71,22 +77,31 @@ if __name__ == '__main__':
             try:
                 if algorithm == "TRPO":
                     model = TRPO.load(args.model_path, env=env)
-                else:
+                elif algorithm == "A2C":
                     model = A2C.load(args.model_path, env=env)
+                else:  # PPO
+                    model = PPO.load(args.model_path, env=env)
                 print(f"Successfully loaded {algorithm} model for continued training")
             except Exception as e:
                 print(f"Error loading model: {e}")
                 print(f"Creating new {algorithm} model instead...")
                 if algorithm == "TRPO":
                     model = TRPO("MlpPolicy", env, verbose=1)
-                else:
+                elif algorithm == "A2C":
                     model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
+                else:  # PPO
+                    model = PPO("MlpPolicy", env, learning_rate=0.0003, n_steps=2048, batch_size=64, 
+                               n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2, verbose=1)
         else:
             print(f"Starting new training run with {algorithm}...")
             if algorithm == "TRPO":
-                model = TRPO("MlpPolicy", env, verbose=1)
-            else:
+                model = TRPO("MlpPolicy", env, verbose=1, cg_max_steps=300)
+            elif algorithm == "A2C":
                 model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
+            else:  # PPO
+                model = PPO("MlpPolicy", env, learning_rate=0.0003, n_steps=2048, batch_size=64, 
+                           n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2, verbose=1)
+        
         
         # Create directory for saving checkpoints
         checkpoint_dir = os.path.join(config.data_dir, "checkpoints")
@@ -105,7 +120,7 @@ if __name__ == '__main__':
         metrics_callback = RobotTrainingMonitor()
         
         # Use both callbacks during training
-        model.learn(total_timesteps=1000000, callback=[metrics_callback, checkpoint_callback])
+        model.learn(total_timesteps=10000000, callback=[metrics_callback, checkpoint_callback])
         
         print("\n--- Training complete. Starting evaluation ---")
 

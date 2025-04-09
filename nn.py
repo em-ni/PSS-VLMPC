@@ -30,31 +30,38 @@ def parse_args():
                         help="Validation split ratio")
     parser.add_argument("--early_stopping", type=int, default=50,
                         help="Early stopping patience")
+    parser.add_argument("--flip_io", action="store_true",
+                        help="Flip inputs and outputs (predict volumes from coordinates)")
     return parser.parse_args()
 
-def load_and_preprocess_data(csv_path):
+def load_and_preprocess_data(csv_path, flip_io=False):
     """Load the CSV data and preprocess it for the neural network"""
     print(f"Loading data from {csv_path}")
     df = pd.read_csv(csv_path)
     
-    # Extract volumes (inputs)
+    # Extract volumes
     volumes = df[['volume_1', 'volume_2', 'volume_3']].values
     
-    # Calculate tip-base difference (outputs)
+    # Calculate tip-base difference
     df['delta_x'] = df['tip_x'] - df['base_x']
     df['delta_y'] = df['tip_y'] - df['base_y']
     df['delta_z'] = df['tip_z'] - df['base_z']
     deltas = df[['delta_x', 'delta_y', 'delta_z']].values
     
-    # Scale inputs to [0, 1] range
+    # Create scalers for both data types
     scaler_volumes = MinMaxScaler(feature_range=(0, 1))
     volumes_scaled = scaler_volumes.fit_transform(volumes)
     
-    # Scale outputs to [-1, 1] range
     scaler_deltas = MinMaxScaler(feature_range=(-1, 1))
     deltas_scaled = scaler_deltas.fit_transform(deltas)
     
-    return volumes_scaled, deltas_scaled, scaler_volumes, scaler_deltas
+    # Flip inputs and outputs if requested
+    if flip_io:
+        print("Flipping inputs and outputs: Training model to predict volumes from coordinates")
+        return deltas_scaled, volumes_scaled, scaler_deltas, scaler_volumes
+    else:
+        print("Normal mode: Training model to predict coordinates from volumes")
+        return volumes_scaled, deltas_scaled, scaler_volumes, scaler_deltas
 
 def create_datasets(volumes, deltas, val_split=0.2):
     """Create PyTorch datasets and dataloaders"""
@@ -88,7 +95,12 @@ def train_model(args):
         return
     
     # Load and preprocess data
-    volumes, deltas, scaler_volumes, scaler_deltas = load_and_preprocess_data(csv_path)
+    volumes, deltas, scaler_volumes, scaler_deltas = load_and_preprocess_data(
+        csv_path, flip_io=args.flip_io)
+    
+    # Adjust model input/output dimensions if flipped
+    input_dim = 3  # Always 3 (either volumes or deltas, both are 3D)
+    output_dim = 3  # Always 3 (either deltas or volumes, both are 3D)
     
     # Create datasets and dataloaders
     train_dataset, val_dataset = create_datasets(volumes, deltas, args.val_split)
@@ -96,7 +108,7 @@ def train_model(args):
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
     
     # Initialize model, loss, optimizer
-    model = VolumeNet(input_dim=3, output_dim=3)
+    model = VolumeNet(input_dim=input_dim, output_dim=output_dim)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     
@@ -156,33 +168,40 @@ def train_model(args):
     # Load best model
     model.load_state_dict(best_model)
     
-    # Save model
-    torch.save(model.state_dict(), args.experiment_folder)
-    print(f"Model saved to {args.experiment_folder}")
+    # Save model and scalers with appropriate naming
+    model_filename = "inverse_volume_net.pth" if args.flip_io else "volume_net.pth"
+    model_path = os.path.join(args.experiment_folder, model_filename)
+    torch.save(model.state_dict(), model_path)
+    print(f"Model saved to {model_path}")
     
-    # Save scalers
-    scalers_path = os.path.join(os.path.dirname(args.experiment_folder), "volume_net_scalers.npz")
-    np.savez(scalers_path, 
-             volumes_min=scaler_volumes.min_, volumes_scale=scaler_volumes.scale_,
-             deltas_min=scaler_deltas.min_, deltas_scale=scaler_deltas.scale_)
+    # Save scalers - now saving to experiment folder instead of parent directory
+    scalers_filename = "inverse_volume_net_scalers.npz" if args.flip_io else "volume_net_scalers.npz"
+    scalers_path = os.path.join(args.experiment_folder, scalers_filename)
+    np.savez(
+        scalers_path,
+        volumes_min=scaler_volumes.min_,
+        volumes_scale=scaler_volumes.scale_,
+        deltas_min=scaler_deltas.min_,
+        deltas_scale=scaler_deltas.scale_
+    )
     print(f"Scalers saved to {scalers_path}")
     
-    # Save training history
+    # Save training history - now saving to experiment folder
     history = {
         "train_loss": train_losses,
         "val_loss": val_losses
     }
-    history_path = os.path.join(os.path.dirname(args.experiment_folder), "volume_net_history.json")
+    history_path = os.path.join(args.experiment_folder, "volume_net_history.json")
     with open(history_path, 'w') as f:
         json.dump(history, f)
     
-    # Plot results
-    plot_training_results(train_losses, val_losses, args.model_path)
+    # Plot results and save to experiment folder
+    plot_training_results(train_losses, val_losses, args.experiment_folder)
     
     # Evaluate on validation set
-    evaluate_model(model, val_loader, scaler_volumes, scaler_deltas)
+    evaluate_model(model, val_loader, scaler_volumes, scaler_deltas, args.experiment_folder)
 
-def evaluate_model(model, dataloader, scaler_volumes, scaler_deltas):
+def evaluate_model(model, dataloader, scaler_volumes, scaler_deltas, save_dir):
     """Evaluate the model and visualize predictions"""
     model.eval()
     
@@ -236,11 +255,14 @@ def evaluate_model(model, dataloader, scaler_volumes, scaler_deltas):
         ax.set_title(f'Delta {dimensions[i]} Prediction')
         ax.grid(True)
     
+    # Save plot to experiment folder
     plt.tight_layout()
-    plt.savefig('models/validation_predictions.png')
+    plot_path = os.path.join(save_dir, "validation_predictions.png")
+    plt.savefig(plot_path)
     plt.close()
+    print(f"Validation predictions saved to {plot_path}")
 
-def plot_training_results(train_losses, val_losses, model_path):
+def plot_training_results(train_losses, val_losses, save_dir):
     """Plot training and validation losses"""
     plt.figure(figsize=(10, 6))
     plt.plot(train_losses, label='Training Loss')
@@ -251,8 +273,8 @@ def plot_training_results(train_losses, val_losses, model_path):
     plt.legend()
     plt.grid(True)
     
-    # Save plot
-    plot_path = os.path.join(os.path.dirname(model_path), "training_loss.png")
+    # Save plot to experiment folder
+    plot_path = os.path.join(save_dir, "training_loss.png")
     plt.savefig(plot_path)
     plt.close()
     print(f"Training plot saved to {plot_path}")
@@ -266,8 +288,11 @@ def test_model(args):
         print(f"Error: Model not found at {args.model_path}")
         return
     
-    # Load scalers
-    scalers_path = os.path.join(os.path.dirname(args.model_path), "volume_net_scalers.npz")
+    # Look for scalers in the same directory as the model
+    model_dir = os.path.dirname(args.model_path)
+    scalers_filename = "inverse_volume_net_scalers.npz" if "inverse" in args.model_path else "volume_net_scalers.npz"
+    scalers_path = os.path.join(model_dir, scalers_filename)
+    
     if not os.path.exists(scalers_path):
         print(f"Error: Scalers not found at {scalers_path}")
         return
@@ -332,7 +357,7 @@ def test_model(args):
     print(f"MAE: {mae:.6f}")
     print(f"RMSE: {rmse:.6f}")
     
-    # Plot predictions vs actual
+    # Plot predictions vs actual and save to experiment folder
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     dimensions = ['X', 'Y', 'Z']
     
@@ -346,8 +371,9 @@ def test_model(args):
         ax.grid(True)
     
     plt.tight_layout()
-    plt.savefig('models/test_predictions.png')
-    print("Test predictions plot saved to models/test_predictions.png")
+    test_plot_path = os.path.join(model_dir, "test_predictions.png")
+    plt.savefig(test_plot_path)
+    print(f"Test predictions plot saved to {test_plot_path}")
     plt.show()
 
 def main():

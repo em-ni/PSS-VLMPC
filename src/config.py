@@ -93,6 +93,7 @@ lstm_num_layers = 2
 input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
 
 # RL goal
-pick_random_goal = True
+pick_random_goal = False
+use_trajectory = True
 rl_goal = np.array([2.5, 1.7, 1.0], dtype=np.float32)
 
