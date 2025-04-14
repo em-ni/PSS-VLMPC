@@ -1,402 +1,209 @@
-import os
-import sys
 import numpy as np
-import torch
-import casadi as ca
-import do_mpc
-from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+import time
+import os
+from tests.test_blob_sampling import load_point_cloud_from_csv
+import src.config as config 
+from utils.traj_functions import generate_snapped_trajectory
+from utils.nn_functions import load_model_and_scalers
+from utils.mpc_functions import predict_delta_from_volume, solve_for_optimal_volume
 
-# --- 1. Environment Setup & Imports ---
+# --- Import constants from config ---
+STATE_DIM = config.STATE_DIM
+CONTROL_DIM = config.CONTROL_DIM
+VOLUME_DIM = config.VOLUME_DIM
+DT = config.DT
+T_SIM = config.T_SIM
+N_sim_steps = config.N_sim_steps
+V_REST = config.V_REST
+VOLUME_BOUNDS_LIST = config.VOLUME_BOUNDS_LIST
+U_MIN_CMD = config.U_MIN_CMD
+U_MAX_CMD = config.U_MAX_CMD
+Q_matrix = config.Q_matrix
+R_matrix = config.R_matrix
+OPTIMIZER_METHOD = config.OPTIMIZER_METHOD
+PERTURBATION_SCALE = config.PERTURBATION_SCALE
+MODEL_PATH = config.MODEL_PATH
+SCALERS_PATH = config.SCALERS_PATH
+POINT_CLOUD_PATH = config.POINT_CLOUD_PATH
 
-# Add project root to sys.path if necessary (adjust path as needed)
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if project_root not in sys.path:
-     sys.path.insert(0, project_root)
-# Make sure these modules can be imported
-try:
-    import src.config as config
-    from src.nn_model import VolumeNet
-except ImportError as e:
-    print(f"Error importing necessary modules: {e}")
-    print("Please ensure src/config.py and src/nn_model.py exist and paths are correct.")
-    sys.exit(1)
+# --- Main Simulation ---
+def run_simulation():
+    """Runs the single-step optimization control loop following a generated trajectory."""
+    nn_model, scaler_volumes, scaler_deltas, nn_device = load_model_and_scalers(MODEL_PATH, SCALERS_PATH)
+    if nn_model is None: return
 
-# --- 2. NN Model Loading & Prediction Function ---
-
-# Global variables to hold the model and scalers (load once)
-nn_model = None
-scaler_volumes = None
-scaler_deltas = None
-nn_device = None
-
-def load_nn_model_and_scalers(model_path, scalers_path):
-    """Loads the PyTorch model and scikit-learn scalers."""
-    global nn_model, scaler_volumes, scaler_deltas, nn_device
-
-    if nn_model is not None: # Already loaded
+    # 1. Load Point Cloud
+    try:
+        point_cloud = load_point_cloud_from_csv(POINT_CLOUD_PATH)
+        if len(point_cloud) == 0: raise ValueError("Point cloud file is empty.")
+        print(f"Loaded point cloud with {len(point_cloud)} points.")
+    except Exception as e:
+        print(f"FATAL: Error loading point cloud '{POINT_CLOUD_PATH}': {e}. Cannot generate trajectory.")
         return
 
-    print("Loading NN model and scalers...")
-    try:
-        # Load scalers
-        scalers = np.load(scalers_path)
-        scaler_volumes = MinMaxScaler()
-        scaler_volumes.min_ = scalers['volumes_min']
-        scaler_volumes.scale_ = scalers['volumes_scale']
-
-        scaler_deltas = MinMaxScaler()
-        scaler_deltas.min_ = scalers['deltas_min']
-        scaler_deltas.scale_ = scalers['deltas_scale']
-        print("Scalers loaded.")
-
-        # Set device
-        nn_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {nn_device}")
-
-        # Load model
-        nn_model = VolumeNet(input_dim=3, output_dim=3)
-        nn_model.load_state_dict(torch.load(model_path, map_location=nn_device))
-        nn_model = nn_model.to(nn_device)
-        nn_model.eval()
-        print("NN model loaded.")
-
-    except FileNotFoundError as e:
-        print(f"Error loading NN files: {e}")
-        print(f"Ensure model path '{model_path}' and scalers path '{scalers_path}' are correct.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"An unexpected error occurred during NN loading: {e}")
-        sys.exit(1)
-
-def predict_tip_standalone(command: np.ndarray) -> np.ndarray:
-    """
-    Predicts the tip position based on the command using the loaded NN model.
-    Input: command (np.ndarray, shape (3,)) - motor strokes/commands
-    Output: tip_position (np.ndarray, shape (3,))
-    """
-    global nn_model, scaler_volumes, scaler_deltas, nn_device
-
-    if nn_model is None:
-        raise RuntimeError("NN Model not loaded. Call load_nn_model_and_scalers first.")
-
-    # Ensure command is float32
-    command = command.astype(np.float32)
-
-    # Calculate volumes based on command and initial position
-    volumes = np.zeros(3, dtype=np.float32)
-    volumes[0] = config.initial_pos + command[0]
-    volumes[1] = config.initial_pos + command[1]
-    volumes[2] = config.initial_pos + command[2]
-
-    # Reshape for scaler
-    volumes_2d = volumes.reshape(1, -1)
-
-    # Scale inputs
-    volumes_scaled = scaler_volumes.transform(volumes_2d)
-
-    # Convert to tensor and move to device
-    volumes_tensor = torch.tensor(volumes_scaled, dtype=torch.float32).to(nn_device)
-
-    # Make predictions
-    with torch.no_grad():
-        predictions_tensor = nn_model(volumes_tensor)
-        predictions_scaled = predictions_tensor.cpu().numpy()
-
-    # Inverse transform predictions
-    predictions = scaler_deltas.inverse_transform(predictions_scaled)
-
-    # Return the 3D tip position
-    return predictions[0]
-
-
-# --- 3. CasADi Wrapper for NN ---
-
-# This function will be called by CasADi during optimization.
-# It needs to take CasADi symbolic types (like DM or SX) and return them.
-# Internally, it converts to numpy, calls the PyTorch function, and converts back.
-def nn_kinematics_casadi_wrapper(u_ca):
-    """
-    CasADi wrapper for the predict_tip_standalone function.
-    Input: u_ca (CasADi symbolic type, shape (3,1)) - motor commands
-    Output: x_next_ca (CasADi symbolic type, shape (3,1)) - predicted tip position
-    """
-    # Convert CasADi input to numpy
-    # .full() converts DM to numpy array
-    u_np = u_ca.full().flatten()
-
-    # Call the standalone prediction function
-    x_next_np = predict_tip_standalone(u_np)
-
-    # Convert numpy output back to CasADi DM
-    x_next_ca = ca.DM(x_next_np).reshape((3, 1))
-    return x_next_ca
-
-# Create the CasADi external function
-# 'nn_func' is the name CasADi uses.
-# The second argument is the Python function to wrap.
-# Input/output definitions tell CasADi about the shapes.
-input_sx = ca.SX.sym('u_sx', 3, 1) # Define symbolic input for shape deduction
-output_sx = ca.SX.sym('x_next_sx', 3, 1) # Define symbolic output for shape deduction
-
-try:
-    # Attempt to load the model now to ensure paths are valid before defining the external function
-    nn_model_path = r"data/exp_2025-04-04_19-17-42/volume_net.pth" # ADJUST PATH
-    nn_scalers_path = r"data/exp_2025-04-04_19-17-42/volume_net_scalers.npz" # ADJUST PATH
-    load_nn_model_and_scalers(nn_model_path, nn_scalers_path)
-
-    # Define the external function using the wrapper
-    nn_casadi_func = ca.external('nn_kinematics', nn_kinematics_casadi_wrapper)
-    # Test call (optional, for debugging)
-    # test_input = ca.DM([0.1, 0.2, 0.3])
-    # test_output = nn_casadi_func(test_input)
-    # print("CasADi external function test output:", test_output)
-
-except Exception as e:
-    print(f"Error creating CasADi external function: {e}")
-    print("Ensure NN model/scalers loaded correctly and CasADi is working.")
-    sys.exit(1)
-
-
-# --- 4. do-mpc Model Setup ---
-
-model_type = 'discrete' # Using discrete model x_k+1 = f(u_k)
-model = do_mpc.model.Model(model_type)
-
-# States struct (tip position)
-pos = model.set_variable(var_type='_x', var_name='pos', shape=(3,1))
-tip_x = pos[0]
-tip_y = pos[1]
-tip_z = pos[2]
-
-# Input struct (commands)
-u = model.set_variable(var_type='_u', var_name='cmd', shape=(3,1))
-
-# Time-varying parameters struct (reference trajectory)
-ref = model.set_variable(var_type='_tvp', var_name='reference', shape=(3,1))
-
-# System dynamics using the NN external function
-# x_{k+1} = nn_casadi_func(u_k)
-x_next = nn_casadi_func(u)
-model.set_rhs('pos', x_next)
-
-# Setup model
-try:
-    model.setup()
-    print("do-mpc model setup complete.")
-except Exception as e:
-    print(f"Error during do-mpc model setup: {e}")
-    sys.exit(1)
-
-# --- 5. Trajectory Definition ---
-
-# Example: Circular trajectory in the xy-plane
-sim_steps = 100
-t_step_traj = 0.1 # Time step used for generating the trajectory points
-total_time = sim_steps * t_step_traj
-radius = 5.0
-center_x = 5.0
-center_y = 0.0
-fixed_z = 10.0 # Assuming a fixed height for simplicity
-
-time_vec = np.linspace(0, total_time, sim_steps + 1)
-ref_trajectory = np.zeros((sim_steps + 1, 3))
-ref_trajectory[:, 0] = center_x + radius * np.cos(2 * np.pi * time_vec / total_time)
-ref_trajectory[:, 1] = center_y + radius * np.sin(2 * np.pi * time_vec / total_time)
-ref_trajectory[:, 2] = fixed_z
-
-# --- 6. do-mpc MPC Setup ---
-
-mpc = do_mpc.controller.MPC(model)
-
-# MPC parameters
-setup_mpc = {
-    'n_horizon': 20,      # Prediction horizon
-    't_step': 0.1,        # Control interval length (should match trajectory time step ideally)
-    'n_robust': 0,        # No robustness needed for now
-    'store_full_solution': True,
-}
-mpc.set_param(**setup_mpc)
-mpc.settings.supress_ipopt_output() # Suppress solver output
-
-# Objective function: ||x_k - x_ref,k||^2_Q + ||delta_u_k||^2_R
-# Weighting matrices
-Q = np.diag([1.0, 1.0, 1.0]) # State tracking weight
-R = np.diag([0.1, 0.1, 0.1]) # Input rate penalty weight
-
-# Mayer term (at the end of horizon) - identical to Lagrange term here
-mterm = ca.sumsqr(Q @ (model.x['pos'] - model.tvp['reference']))
-# Lagrange term (at each step)
-lterm = ca.sumsqr(Q @ (model.x['pos'] - model.tvp['reference']))
-
-mpc.set_objective(mterm=mterm, lterm=lterm)
-
-# Input rate penalty (delta_u = u_k - u_{k-1})
-mpc.set_rterm(cmd=R[0,0]) # Assuming diagonal R, same weight for all inputs
-
-# Constraints
-# Input bounds (adjust based on config.max_stroke)
-max_command = config.max_stroke # Example value, use your actual config
-mpc.bounds['lower','_u','cmd'] = 0.0
-mpc.bounds['upper','_u','cmd'] = max_command
-
-# Workspace bounds (optional, example) - Be careful with feasibility
-# mpc.bounds['lower','_x','pos'] = np.array([-10, -10, 0])
-# mpc.bounds['upper','_x','pos'] = np.array([20, 20, 20])
-
-# Time-varying parameter function (provides reference for the horizon)
-tvp_template = mpc.get_tvp_template()
-
-def tvp_fun(t_now):
-    """
-    Provides the reference trajectory points for the entire prediction horizon.
-    """
-    current_time_index = int(round(t_now / setup_mpc['t_step']))
-
-    for k in range(setup_mpc['n_horizon'] + 1):
-        # Calculate the index in the precomputed trajectory
-        traj_index = min(current_time_index + k, sim_steps) # Don't go beyond trajectory length
-        tvp_template['_tvp', k, 'reference'] = ref_trajectory[traj_index, :]
-
-    return tvp_template
-
-mpc.set_tvp_fun(tvp_fun)
-
-# Setup MPC
-try:
-    mpc.setup()
-    print("do-mpc MPC setup complete.")
-except Exception as e:
-    print(f"Error during do-mpc MPC setup: {e}")
-    sys.exit(1)
-
-
-# --- 7. Simulation Loop ---
-
-# Initialize state and guess
-# Use the prediction for zero command as the initial state
-x0 = predict_tip_standalone(np.zeros(3))
-mpc.x0['pos'] = x0
-mpc.set_initial_guess()
-
-# Data storage
-x_history = [x0]
-u_history = []
-ref_history = [ref_trajectory[0, :]]
-time_history = [0.0]
-
-print("Starting simulation loop...")
-for k in range(sim_steps):
-    current_time = k * setup_mpc['t_step']
-    print(f"Step {k+1}/{sim_steps}, Time: {current_time:.2f}")
-
-    # 1. Get MPC control command
-    try:
-        u_k = mpc.make_step(x0)
-    except Exception as e:
-        print(f"\n!!! Error during MPC step {k+1}: {e} !!!")
-        print("Solver likely failed. Check model, constraints, objective, and initial guess.")
-        print(f"Current state x0: {x0.flatten()}")
-        # You might want to stop or try a fallback control action
-        break # Stop simulation on error
-
-    # 2. Simulate the system (using the original Python NN function)
-    x_next = predict_tip_standalone(u_k)
-
-    # 3. Store results
-    x_history.append(x_next)
-    u_history.append(u_k.flatten()) # Store as flat numpy array
-    ref_history.append(ref_trajectory[k+1, :])
-    time_history.append(current_time + setup_mpc['t_step'])
-
-    # 4. Update state for next iteration
-    x0 = x_next
-    mpc.x0['pos'] = x0 # Update MPC's initial state understanding
-
-print("Simulation loop finished.")
-
-# Convert history to numpy arrays
-x_history = np.array(x_history)
-u_history = np.array(u_history)
-ref_history = np.array(ref_history)
-time_history = np.array(time_history)
-
-# --- 8. Plotting ---
-
-print("Plotting results...")
-
-# 3D Trajectory Plot
-fig3d = plt.figure(figsize=(10, 8))
-ax3d = fig3d.add_subplot(111, projection='3d')
-ax3d.plot(x_history[:, 0], x_history[:, 1], x_history[:, 2], label='Actual Trajectory', marker='.', linestyle='-')
-ax3d.plot(ref_history[:, 0], ref_history[:, 1], ref_history[:, 2], label='Reference Trajectory', marker='x', linestyle='--')
-ax3d.scatter(x_history[0, 0], x_history[0, 1], x_history[0, 2], color='green', s=100, label='Start')
-ax3d.scatter(ref_history[-1, 0], ref_history[-1, 1], ref_history[-1, 2], color='red', s=100, label='Goal')
-ax3d.set_xlabel('X position')
-ax3d.set_ylabel('Y position')
-ax3d.set_zlabel('Z position')
-ax3d.set_title('3D Robot Trajectory Tracking')
-ax3d.legend()
-ax3d.grid(True)
-ax3d.axis('equal') # Ensure aspect ratio is equal
-
-# State Tracking Plots (X, Y, Z vs Time)
-fig_states, axs_states = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-axs_states[0].plot(time_history, x_history[:, 0], label='Actual X')
-axs_states[0].plot(time_history, ref_history[:, 0], label='Reference X', linestyle='--')
-axs_states[0].set_ylabel('X position')
-axs_states[0].legend()
-axs_states[0].grid(True)
-
-axs_states[1].plot(time_history, x_history[:, 1], label='Actual Y')
-axs_states[1].plot(time_history, ref_history[:, 1], label='Reference Y', linestyle='--')
-axs_states[1].set_ylabel('Y position')
-axs_states[1].legend()
-axs_states[1].grid(True)
-
-axs_states[2].plot(time_history, x_history[:, 2], label='Actual Z')
-axs_states[2].plot(time_history, ref_history[:, 2], label='Reference Z', linestyle='--')
-axs_states[2].set_ylabel('Z position')
-axs_states[2].set_xlabel('Time (s)')
-axs_states[2].legend()
-axs_states[2].grid(True)
-
-fig_states.suptitle('State Tracking vs Time')
-fig_states.tight_layout(rect=[0, 0.03, 1, 0.97]) # Adjust layout for suptitle
-
-# Control Input Plots (Commands vs Time)
-if u_history.size > 0: # Check if simulation completed at least one step
-    fig_inputs, axs_inputs = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
-    time_inputs = time_history[:-1] # Input corresponds to the start of the interval
-
-    axs_inputs[0].plot(time_inputs, u_history[:, 0], label='Command 1')
-    axs_inputs[0].set_ylabel('Cmd 1')
-    axs_inputs[0].legend()
-    axs_inputs[0].grid(True)
-
-    axs_inputs[1].plot(time_inputs, u_history[:, 1], label='Command 2')
-    axs_inputs[1].set_ylabel('Cmd 2')
-    axs_inputs[1].legend()
-    axs_inputs[1].grid(True)
-
-    axs_inputs[2].plot(time_inputs, u_history[:, 2], label='Command 3')
-    axs_inputs[2].set_ylabel('Cmd 3')
-    axs_inputs[2].set_xlabel('Time (s)')
-    axs_inputs[2].legend()
-    axs_inputs[2].grid(True)
-
-    # Add bounds lines
-    for ax in axs_inputs:
-        ax.axhline(0.0, color='r', linestyle='--', linewidth=0.8, label='Lower Bound')
-        ax.axhline(max_command, color='r', linestyle='--', linewidth=0.8, label='Upper Bound')
-    # Avoid duplicate labels in legend
-    handles, labels = axs_inputs[0].get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    axs_inputs[0].legend(by_label.values(), by_label.keys())
-
-
-    fig_inputs.suptitle('Control Inputs vs Time')
-    fig_inputs.tight_layout(rect=[0, 0.03, 1, 0.97]) # Adjust layout for suptitle
-
-plt.show()
+    # 2. Generate Trajectory
+    num_traj_waypoints = 3
+    delta_ref_trajectory = generate_snapped_trajectory(
+        point_cloud, num_traj_waypoints, T_SIM, N_sim_steps, from_initial_pos=True
+    )
+
+    # 3. Initialize state and history
+    x_current_delta = predict_delta_from_volume(V_REST, nn_model, scaler_volumes, scaler_deltas, nn_device)
+    if np.isnan(x_current_delta).any(): print("FATAL: Failed to predict initial state."); return
+    print(f"Initial State Delta (predicted for v_rest): {x_current_delta}")
+    print(f"Cost Weights: Q_diag={np.diag(Q_matrix)}, R_diag={np.diag(R_matrix)}")
+    print(f"Volume Bounds: {VOLUME_BOUNDS_LIST[0]}")
+    print("-" * 60)
+    print(f"Starting Simulation Loop (Optimizer: {OPTIMIZER_METHOD}, Following Trajectory)...")
+    print("-" * 30)
+
+    state_history = [x_current_delta]; control_history = []; volume_history = [V_REST]; computation_times = []
+    current_actual_volume = V_REST.copy()
+
+    # --- Simulation Loop ---
+    for i in range(N_sim_steps): # Loop from 0 to N_sim_steps-1
+        step_start_time = time.time()
+
+        # *** The target for control u_i applied at step i should be the reference at step i+1 ***
+        delta_ref_current = delta_ref_trajectory[i+1] # Target state for the *end* of this step
+
+        v_star = solve_for_optimal_volume(
+            delta_ref_current, Q_matrix, R_matrix, VOLUME_BOUNDS_LIST, V_REST,
+            nn_model, scaler_volumes, scaler_deltas, nn_device,
+            v_guess_init=current_actual_volume,
+            method=OPTIMIZER_METHOD,
+            perturbation_scale=PERTURBATION_SCALE
+        )
+        u_star = v_star - V_REST
+        u_star_clipped = np.clip(u_star, U_MIN_CMD, U_MAX_CMD)
+        v_actual = V_REST + u_star_clipped
+        current_actual_volume = v_actual # Update warm start base
+
+        comp_time = time.time() - step_start_time
+        computation_times.append(comp_time)
+        control_history.append(u_star_clipped)
+        volume_history.append(v_actual)
+
+        # Simulate the system's next state (state at step i+1) based on the actual volume/command applied at step i
+        x_next_delta = predict_delta_from_volume(v_actual, nn_model, scaler_volumes, scaler_deltas, nn_device)
+        if np.isnan(x_next_delta).any(): print(f"FATAL: NaN prediction at step {i+1}. Stopping."); break
+
+        # Update state for the next iteration (this is now state at i+1)
+        x_current_delta = x_next_delta
+        state_history.append(x_current_delta)
+
+        # Print progress: Compare state at i+1 with target at i+1
+        current_error_norm = np.linalg.norm(x_current_delta - delta_ref_current)
+        print(f"Step {i+1}/{N_sim_steps} | State Delta: [{x_current_delta[0]:.3f}, {x_current_delta[1]:.3f}, {x_current_delta[2]:.3f}] | Target: [{delta_ref_current[0]:.3f},{delta_ref_current[1]:.3f},{delta_ref_current[2]:.3f}] | ErrNorm: {current_error_norm:.3f} | Cmd u*: [{u_star_clipped[0]:.3f}, {u_star_clipped[1]:.3f}, {u_star_clipped[2]:.3f}] | Time: {comp_time:.4f}s")
+
+    # --- Final Summary ---
+    print("-" * 30); print("Simulation finished.")
+    if computation_times: print(f"Average/Maximum computation time per optimization step: {np.mean(computation_times):.4f}s / {np.max(computation_times):.4f}s")
+    final_target = delta_ref_trajectory[-1]
+    final_error = np.linalg.norm(x_current_delta - final_target)
+    print(f"Final State Delta: {x_current_delta}"); print(f"Final Target Delta: {final_target}"); print(f"Final Error Norm (Delta): {final_error:.4f}")
+
+    # --- Plotting Results ---
+    plot_results(state_history, control_history, delta_ref_trajectory, point_cloud, DT, U_MIN_CMD, U_MAX_CMD)
+
+# --- Plotting Function ---
+def plot_results(state_history, control_history, delta_ref_trajectory, point_cloud, dt, u_min, u_max):
+    """Plots the state delta (2D and 3D) and control command history."""
+    state_history = np.array(state_history)
+    control_history = np.array(control_history)
+    num_plot_steps = len(state_history)
+    reference_history = delta_ref_trajectory[:num_plot_steps]
+
+    time_axis_state = np.arange(num_plot_steps) * dt
+    time_axis_control = np.arange(len(control_history)) * dt
+
+    # --- Figure 1: 2D Plots (State vs Time, Control vs Time) ---
+    fig1, axs = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+    fig1.suptitle('Trajectory Following Control Results')
+
+    # Plot State Deltas vs Reference Trajectory (Time Domain)
+    axs[0].set_title('State Delta vs. Time')
+    labels_delta = ['Actual Delta X', 'Actual Delta Y', 'Actual Delta Z']
+    labels_ref = ['Ref Delta X', 'Ref Delta Y', 'Ref Delta Z']
+    colors = plt.cm.viridis(np.linspace(0, 0.8, STATE_DIM))
+    for i in range(STATE_DIM):
+        axs[0].plot(time_axis_state, state_history[:, i], 'o-', color=colors[i], markersize=3, linewidth=1.5, label=labels_delta[i])
+        axs[0].plot(time_axis_state, reference_history[:, i], '--', color=colors[i], linewidth=2.0, label=labels_ref[i])
+    axs[0].set_ylabel('State Delta Value')
+    axs[0].legend(ncol=2)
+    axs[0].grid(True)
+
+    # Plot Control Commands (u*) (Time Domain)
+    axs[1].set_title('Control Inputs (Commands u*) vs. Time')
+    labels_cmd = ['Command u1', 'Command u2', 'Command u3']
+    if len(control_history) > 0:
+        for i in range(CONTROL_DIM):
+            axs[1].plot(time_axis_control, control_history[:, i], label=labels_cmd[i], drawstyle='steps-post')
+        axs[1].axhline(u_min, color='r', linestyle='--', label=f'Min/Max Cmd ({u_min:.1f}, {u_max:.1f})')
+        axs[1].axhline(u_max, color='r', linestyle='--')
+        axs[1].set_ylabel('Command Value')
+        axs[1].legend(loc='best')
+    else:
+        axs[1].text(0.5, 0.5, 'No control history', ha='center', va='center')
+    axs[1].grid(True)
+    axs[1].set_xlabel('Time (s)')
+
+    fig1.tight_layout(rect=[0, 0.03, 1, 0.97]) # Adjust layout to prevent title overlap
+
+    # --- Figure 2: 3D Trajectory Plot ---
+    fig2 = plt.figure(figsize=(10, 8))
+    ax3d = fig2.add_subplot(111, projection='3d')
+
+    # Plot Point Cloud (optional, can be slow if large)
+    if point_cloud is not None and len(point_cloud) > 0:
+         # Downsample point cloud for plotting if too large
+         plot_pc_step = max(1, len(point_cloud) // 5000) # Aim for ~5000 points
+         ax3d.scatter(point_cloud[::plot_pc_step, 0], point_cloud[::plot_pc_step, 1], point_cloud[::plot_pc_step, 2],
+                      c='lightgray', marker='.', s=1, label='Workspace (Sampled)')
+
+    # Plot Reference Trajectory
+    ax3d.plot(reference_history[:, 0], reference_history[:, 1], reference_history[:, 2],
+              'r--', linewidth=2, label='Reference Trajectory')
+    ax3d.scatter(reference_history[0, 0], reference_history[0, 1], reference_history[0, 2],
+                 c='red', marker='o', s=50, label='Reference Start')
+    ax3d.scatter(reference_history[-1, 0], reference_history[-1, 1], reference_history[-1, 2],
+                 c='red', marker='x', s=100, label='Reference End')
+
+    # Plot Actual Trajectory
+    ax3d.plot(state_history[:, 0], state_history[:, 1], state_history[:, 2],
+              'b-', linewidth=2, label='Actual Trajectory')
+    ax3d.scatter(state_history[0, 0], state_history[0, 1], state_history[0, 2],
+                 c='blue', marker='o', s=50, label='Actual Start')
+    ax3d.scatter(state_history[-1, 0], state_history[-1, 1], state_history[-1, 2],
+                 c='blue', marker='x', s=100, label='Actual End')
+
+    # Setting Labels and Title
+    ax3d.set_xlabel('Delta X')
+    ax3d.set_ylabel('Delta Y')
+    ax3d.set_zlabel('Delta Z')
+    ax3d.set_title('3D Trajectory Comparison')
+
+    # Adjust plot limits to fit data (optional, helps visualization)
+    all_points = np.vstack((state_history, reference_history))
+    min_coords = all_points.min(axis=0)
+    max_coords = all_points.max(axis=0)
+    center = (max_coords + min_coords) / 2
+    max_range = (max_coords - min_coords).max() / 2.0 * 1.1 # 10% padding
+    ax3d.set_xlim(center[0] - max_range, center[0] + max_range)
+    ax3d.set_ylim(center[1] - max_range, center[1] + max_range)
+    ax3d.set_zlim(center[2] - max_range, center[2] + max_range)
+
+    # Make axes equal for better 3D perception
+    # ax3d.set_aspect('equal', adjustable='box') # Matplotlib might struggle with this
+
+    ax3d.legend()
+    ax3d.grid(True)
+
+    plt.show() # Show both figures
+
+# --- Script Execution ---
+if __name__ == "__main__":
+    if not os.path.exists(MODEL_PATH): print(f"FATAL ERROR: Model file not found at {MODEL_PATH}")
+    elif not os.path.exists(SCALERS_PATH): print(f"FATAL ERROR: Scalers file not found at {SCALERS_PATH}")
+    else: run_simulation()

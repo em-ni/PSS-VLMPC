@@ -10,6 +10,7 @@ import src.config as config
 from src.robot_env import RobotEnv
 from src.rl_train_monitor import RobotTrainingMonitor
 from src.sim_robot_env import SimRobotEnv
+from src.mpc_sim_env import MpcSimEnv
 from utils.circle_arc import calculate_circle_through_points
 import argparse
 import torch
@@ -67,7 +68,8 @@ if __name__ == '__main__':
     if args.sim:
         # Create a simulated environment with the neural network model
         print("Using simulated environment")
-        env = SimRobotEnv()
+        # env = SimRobotEnv()
+        env = MpcSimEnv()
 
     else:
         # Create a real robot environment.

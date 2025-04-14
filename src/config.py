@@ -79,6 +79,9 @@ if pressure_only:
     output_dim = 3
 else:
     output_dim = 6
+MODEL_PATH = "data/exp_2025-04-04_19-17-42/volume_net.pth"
+SCALERS_PATH = "data/exp_2025-04-04_19-17-42/volume_net_scalers.npz"
+POINT_CLOUD_PATH = "data/exp_2025-04-04_19-17-42/output_exp_2025-04-04_19-17-42.csv"
 
 # LSTM
 sequence_length = 1  # T=3 -> sequence length 4 (t, t-1, t-2, t-3)
@@ -93,8 +96,29 @@ lstm_num_layers = 2
 input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
 
 # RL goal
-pick_random_goal = False
+pick_random_goal = True
 use_trajectory = False
-N_points = 10
+N_points = 0
 rl_goal = np.array([2.5, 1.7, 1.0], dtype=np.float32)
+
+# MPC parameters
+STATE_DIM = 3; CONTROL_DIM = 3; VOLUME_DIM = 3
+DT = 0.1; T_SIM = 10.0; N_sim_steps = int(T_SIM / DT)
+
+U_MAX_CMD = float(max_stroke)
+U_MIN_CMD = 0
+
+INITIAL_POS_VAL = float(initial_pos)
+V_MIN_PHYSICAL = INITIAL_POS_VAL + U_MIN_CMD
+V_MAX_PHYSICAL = INITIAL_POS_VAL + U_MAX_CMD
+VOLUME_BOUNDS_LIST = [(V_MIN_PHYSICAL, V_MAX_PHYSICAL)] * VOLUME_DIM
+V_REST = np.array([INITIAL_POS_VAL] * VOLUME_DIM)
+
+Q_WEIGHT = 1e6 
+R_WEIGHT = 0
+Q_matrix = np.diag([Q_WEIGHT] * STATE_DIM)
+R_matrix = np.diag([R_WEIGHT] * VOLUME_DIM)
+
+OPTIMIZER_METHOD = 'trust-constr' # 'SLSQP', 'L-BFGS-B', 'TNC' are also options but not good
+PERTURBATION_SCALE = 0.05
 

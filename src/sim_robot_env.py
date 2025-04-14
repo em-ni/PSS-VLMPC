@@ -10,7 +10,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import src.config as config
 from src.nn_model import VolumeNet
-from tests.test_blob_sampling import generate_surface, sample_point_in_hull, is_inside_hull, load_point_cloud_from_csv
+from tests.test_blob_sampling import generate_surface, load_point_cloud_from_csv
+from utils.nn_functions import predict_tip
+from utils.traj_functions import pick_goal
 
 class SimRobotEnv(gym.Env):
     """
@@ -49,15 +51,19 @@ class SimRobotEnv(gym.Env):
         print("Neural network initialized.")
 
         # Initialize tip position with commands at initial position
-        self.tip = self.predict_tip(np.zeros(3, dtype=np.float32))  # Initial tip position
-        
+        self.tip = predict_tip(np.zeros(3, dtype=np.float32), 
+                                    self.scaler_volumes, 
+                                    self.scaler_deltas, 
+                                    self.model, 
+                                    self.device
+                                )
         # Curriculum learning properties
         self.curriculum_points = 10  # Start with 10 points
         self.success_counter = 0
         self.success_threshold = 5  # Number of successes before advancing curriculum
         
         if config.pick_random_goal:
-            self.goal = self.pick_goal()
+            self.goal = pick_goal(self.point_cloud)
         else:
             if config.use_trajectory:
                 self.spline_points = None
@@ -70,7 +76,7 @@ class SimRobotEnv(gym.Env):
                 # Set the first goal as the initial goal
                 self.goal = self.goals[0]
             else:
-                self.goal = self.pick_goal()
+                self.goal = pick_goal(self.point_cloud)
                 print(f"Setting new goal at {self.goal}")
 
         # Scale max steps based on the number of goals - minimum 100 steps
@@ -113,16 +119,6 @@ class SimRobotEnv(gym.Env):
 
     def get_goal(self):
         return self.goal
-
-    def pick_goal(self):
-        """
-        Pick a random goal within the workspace.
-        """
-        # Pick a random index
-        random_index = np.random.randint(0, len(self.point_cloud))
-                
-        # Return the randomly selected point
-        return self.point_cloud[random_index]
     
     def pick_goals(self, num_goals):
         """
@@ -130,7 +126,7 @@ class SimRobotEnv(gym.Env):
         """
         goals = []
         for _ in range(num_goals):
-            goal = self.pick_goal()
+            goal = pick_goal(self.point_cloud)
             goals.append(goal)
         return np.array(goals)
     
@@ -141,13 +137,13 @@ class SimRobotEnv(gym.Env):
         num_points = 5
         random_points = []
         for i in range(num_points):
-            random_points.append(self.pick_goal())
+            random_points.append(pick_goal(self.point_cloud))
         # Interpolate between the tip and the goal passing through the random points
         # Take last point of the previous trajectory as the starting point
         if self.spline_points is not None:
             self.trajectory_points = np.vstack([self.spline_points[-1], random_points])
         else:
-            self.trajectory_points = np.vstack([self.pick_goal(), random_points])
+            self.trajectory_points = np.vstack([pick_goal(self.point_cloud), random_points])
 
         # Sort points by distance from the tip position (initial position) for a more natural path
         distances = np.linalg.norm(self.trajectory_points - self.tip, axis=1)
@@ -207,7 +203,7 @@ class SimRobotEnv(gym.Env):
         
         for _ in range(num_goals):
             # Sample several candidate points
-            candidates = [self.pick_goal() for _ in range(10)]
+            candidates = [pick_goal(self.point_cloud) for _ in range(10)]
             
             # Pick the one that's closest to the last point but still far enough to be interesting
             distances = [np.linalg.norm(c - last_point) for c in candidates]
@@ -218,35 +214,6 @@ class SimRobotEnv(gym.Env):
             last_point = next_point
         
         return np.array(goals)
-
-    def predict_tip(self, command):
-        """
-        Predict the tip position based on the command using the neural network model.
-        """
-        volumes = np.zeros(3, dtype=np.float32)
-        volumes[0] = config.initial_pos + command[0]
-        volumes[1] = config.initial_pos + command[1] 
-        volumes[2] = config.initial_pos + command[2]
-        
-        # Reshape to 2D array (1 sample, 3 features) for scikit-learn
-        volumes_2d = volumes.reshape(1, -1)
-        
-        # Scale inputs
-        volumes_scaled = self.scaler_volumes.transform(volumes_2d)
-
-        # Convert to tensor and move to the appropriate device (GPU if available)
-        volumes_tensor = torch.tensor(volumes_scaled, dtype=torch.float32).to(self.device)
-
-        # Make predictions
-        with torch.no_grad():
-            # Run the model on the device (GPU if available)
-            predictions_tensor = self.model(volumes_tensor)
-            # Move results back to CPU for numpy conversion
-            predictions_scaled = predictions_tensor.cpu().numpy()
-
-        # Inverse transform predictions
-        predictions = self.scaler_deltas.inverse_transform(predictions_scaled)
-        return predictions[0]
 
     def set_goal(self, goal):
         self.goal = goal
@@ -262,7 +229,12 @@ class SimRobotEnv(gym.Env):
             combined_action = min(action[i] + elongation, config.max_stroke)
             command[i] = max(0, combined_action)  # Ensure non-negative
         
-        self.tip = self.predict_tip(command)
+        self.tip = predict_tip(command, 
+                                self.scaler_volumes, 
+                                self.scaler_deltas, 
+                                self.model, 
+                                self.device
+                                )
         distance = np.linalg.norm(self.tip - self.goal)
         self.distances = np.append(self.distances, distance)
         terminated = False
@@ -356,10 +328,11 @@ class SimRobotEnv(gym.Env):
         self.last_action = np.zeros(4, dtype=np.float32)
         
         if config.pick_random_goal:
-            # Change goal with 40% probability for random goal mode
-            if np.random.random() < 0.4:
-                self.goal = self.pick_goal()
-                print(f"Setting new goal at {self.goal}")
+            pass
+            # # Change goal with 40% probability for random goal mode
+            # if np.random.random() < 0.4:
+            #     self.goal = pick_goal(self.point_cloud)
+            #     print(f"Setting new goal at {self.goal}")
         
         elif config.N_points > 0:
             # Reset the trajectory index and pick new goals
