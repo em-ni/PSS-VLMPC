@@ -12,7 +12,35 @@ from src.rl_train_monitor import RobotTrainingMonitor
 from src.sim_robot_env import SimRobotEnv
 from utils.circle_arc import calculate_circle_through_points
 import argparse
+import torch
+from stable_baselines3.common.policies import ActorCriticPolicy
 
+class FixedTRPOPolicy(ActorCriticPolicy):
+    """Custom policy class that handles device correctly for TRPO"""
+    def __init__(self, *args, **kwargs):
+        # Remove device from kwargs before passing to parent
+        if 'device' in kwargs:
+            self._device = kwargs.pop('device')
+        super().__init__(*args, **kwargs)
+        
+    def _build_mlp_extractor(self):
+        # This is the correct way to initialize the MLP extractor in SB3
+        from stable_baselines3.common.torch_layers import MlpExtractor
+        
+        # Force the device to CPU for initialization
+        self.mlp_extractor = MlpExtractor(
+            self.features_dim,
+            net_arch=self.net_arch,
+            activation_fn=self.activation_fn,
+            device='cpu'  # Force CPU initialization
+        )
+        # Move to the correct device after initialization
+        if hasattr(self, '_device') and torch.cuda.is_available():
+            self.mlp_extractor = self.mlp_extractor.to(self._device)
+
+# Check if CUDA is available for RL training
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"RL training will use device: {device}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="RL agent for soft robot (real or simulated)")
@@ -59,48 +87,94 @@ if __name__ == '__main__':
     # Function to run RL training and evaluation.
     def train(env=env):
         # Determine algorithm type
-        # algorithm = "A2C"  
         algorithm = "TRPO"
         # algorithm = "PPO" 
+
+        model_trpo = TRPO(
+            policy=FixedTRPOPolicy,  # Keep using our custom policy class
+            env=env, 
+            policy_kwargs=dict(
+                # Much larger network architecture - adjust both pi (policy) and vf (value function) networks
+                net_arch=dict(
+                    # Policy network - 5 layers with increasing capacity
+                    pi=[512, 512, 384, 256, 128],
+                    # Value network - 5 layers with increasing capacity
+                    vf=[512, 512, 384, 256, 128]
+                ),
+                activation_fn=torch.nn.ReLU
+            ),
+            # Keep these parameters the same
+            cg_max_steps=20,        
+            cg_damping=0.12,        
+            target_kl=0.015,        
+            verbose=1
+        )
         
         # Detect algorithm from model path if provided
         if args.model_path:
             if "trpo" in args.model_path.lower():
                 algorithm = "TRPO"
-            elif "a2c" in args.model_path.lower():
-                algorithm = "A2C"
-            # Otherwise keep PPO as default
         
         # Initialize the model or load from checkpoint if provided
         if args.model_path and os.path.exists(args.model_path):
             print(f"Loading {algorithm} model from {args.model_path} to continue training...")
             try:
                 if algorithm == "TRPO":
-                    model = TRPO.load(args.model_path, env=env)
-                elif algorithm == "A2C":
-                    model = A2C.load(args.model_path, env=env)
+                    model = TRPO.load(args.model_path, env=env, device=device)
                 else:  # PPO
-                    model = PPO.load(args.model_path, env=env)
-                print(f"Successfully loaded {algorithm} model for continued training")
+                    model = PPO.load(args.model_path, env=env, device=device)
+                print(f"Successfully loaded {algorithm} model for continued training on {device}")
             except Exception as e:
                 print(f"Error loading model: {e}")
                 print(f"Creating new {algorithm} model instead...")
                 if algorithm == "TRPO":
-                    model = TRPO("MlpPolicy", env, verbose=1)
-                elif algorithm == "A2C":
-                    model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
+                    # First, create the model WITHOUT specifying device
+                    model = model_trpo
+                    
+                    # Then manually move policy to GPU after initialization
+                    if torch.cuda.is_available():
+                        # Force load policy to GPU
+                        print("Moving TRPO policy to CUDA...")
+                        model.policy.to(torch.device("cuda"))
+                        model.device = torch.device("cuda")
+                        
+                        # Verify device placement
+                        print(f"Policy device: {next(model.policy.parameters()).device}")
+                        
+                        # Monitor GPU memory usage
+                        t = torch.cuda.get_device_properties(0).total_memory
+                        r = torch.cuda.memory_reserved(0)
+                        a = torch.cuda.memory_allocated(0)
+                        f = r-a  # free inside reserved
+                        print(f"GPU Memory: {a/1024**2:.1f}MB allocated, {f/1024**2:.1f}MB free, {r/1024**2:.1f}MB reserved, {t/1024**2:.1f}MB total")
                 else:  # PPO
                     model = PPO("MlpPolicy", env, learning_rate=0.0003, n_steps=2048, batch_size=64, 
-                               n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2, verbose=1)
+                               n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2, verbose=1, device=device)
         else:
             print(f"Starting new training run with {algorithm}...")
             if algorithm == "TRPO":
-                model = TRPO("MlpPolicy", env, verbose=1, cg_max_steps=300)
-            elif algorithm == "A2C":
-                model = A2C("MlpPolicy", env, learning_rate=0.0007, ent_coef=0.05, verbose=1)
+                # First, create the model WITHOUT specifying device
+                model = model_trpo
+                
+                # Then manually move policy to GPU after initialization
+                if torch.cuda.is_available():
+                    # Force load policy to GPU
+                    print("Moving TRPO policy to CUDA...")
+                    model.policy.to(torch.device("cuda"))
+                    model.device = torch.device("cuda")
+                    
+                    # Verify device placement
+                    print(f"Policy device: {next(model.policy.parameters()).device}")
+                    
+                    # Monitor GPU memory usage
+                    t = torch.cuda.get_device_properties(0).total_memory
+                    r = torch.cuda.memory_reserved(0)
+                    a = torch.cuda.memory_allocated(0)
+                    f = r-a  # free inside reserved
+                    print(f"GPU Memory: {a/1024**2:.1f}MB allocated, {f/1024**2:.1f}MB free, {r/1024**2:.1f}MB reserved, {t/1024**2:.1f}MB total")
             else:  # PPO
                 model = PPO("MlpPolicy", env, learning_rate=0.0003, n_steps=2048, batch_size=64, 
-                           n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2, verbose=1)
+                           n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2, verbose=1, device=device)
         
         
         # Create directory for saving checkpoints
@@ -127,7 +201,7 @@ if __name__ == '__main__':
         # Evaluate after training (with the trained model)
         obs, _ = env.reset()
         total_reward = 0
-        eval_episodes = 5
+        eval_episodes = 100
         
         for i in range(eval_episodes):
             episode_reward = 0

@@ -94,6 +94,7 @@ input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "input
 
 # RL goal
 pick_random_goal = False
-use_trajectory = True
+use_trajectory = False
+N_points = 10
 rl_goal = np.array([2.5, 1.7, 1.0], dtype=np.float32)
 

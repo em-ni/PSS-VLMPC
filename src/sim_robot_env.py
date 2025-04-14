@@ -15,22 +15,17 @@ from tests.test_blob_sampling import generate_surface, sample_point_in_hull, is_
 class SimRobotEnv(gym.Env):
     """
     A simulated robot environment using a pre-trained neural network model.
-    Observation: 3D coordinates of the simulated tip wrt to the base (shape: 3,)
-    Action: A 3D discrete vector representing desired volumes (tau).
-    Reward: Negative Euclidean distance from the simulated tip to the goal.
     """
-    metadata = {'render.modes': ['human']}
-
     def __init__(self):
         super(SimRobotEnv, self).__init__()
 
         # Load the point cloud from a CSV file and get the mesh 
-        print("Loading point cloud...")
-        file_path = r"data/exp_2025-04-04_19-17-42/output_exp_2025-04-04_19-17-42.csv"  # Change this to your actual CSV file path
-        point_cloud = load_point_cloud_from_csv(file_path)
-        self.alpha_shape, self.convex_hull = generate_surface(point_cloud, alpha=1.0)
-        
-        # Continuous action space: 4 continuous values from 0 to max_stroke
+        file_path = r"data/exp_2025-04-04_19-17-42/output_exp_2025-04-04_19-17-42.csv"
+        self.point_cloud = load_point_cloud_from_csv(file_path)
+        self.alpha_shape, self.convex_hull = generate_surface(self.point_cloud, alpha=1.0)
+        print("Loaded point cloud")
+
+        # Continuous action space: 4 continuous values from 0 to max_stroke, 3 bending + 1 elongation
         self.action_space = spaces.Box(
             low=0.0, 
             high=config.max_stroke, 
@@ -38,8 +33,16 @@ class SimRobotEnv(gym.Env):
             dtype=np.float32
         )
         
-        # Observation space: 3D coordinates of the tip wrt to the base (shape: 3,)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
+        # Observation space: tip(3) + goal(3) + distance(1) + last_action(4)
+        self.observation_space = spaces.Box(
+            low=-np.inf, 
+            high=np.inf, 
+            shape=(11,), 
+            dtype=np.float32
+        )
+        
+        # Store the last action for observation
+        self.last_action = np.zeros(4, dtype=np.float32)
         
         # Initialize neural network model and scalers
         self.init_nn()
@@ -47,22 +50,34 @@ class SimRobotEnv(gym.Env):
 
         # Initialize tip position with commands at initial position
         self.tip = self.predict_tip(np.zeros(3, dtype=np.float32))  # Initial tip position
+        
+        # Curriculum learning properties
+        self.curriculum_points = 10  # Start with 10 points
+        self.success_counter = 0
+        self.success_threshold = 5  # Number of successes before advancing curriculum
+        
         if config.pick_random_goal:
             self.goal = self.pick_goal()
         else:
-
             if config.use_trajectory:
                 self.spline_points = None
                 self.pick_trajectory()
                 self.current_trajectory_index = 0
+            elif config.N_points > 0:
+                self.current_trajectory_index = 0
+                # Pick a fixed number of goals based on curriculum level
+                self.goals = self.pick_smart_goals(min(self.curriculum_points, config.N_points))
+                # Set the first goal as the initial goal
+                self.goal = self.goals[0]
             else:
-                # self.goal = config.rl_goal
                 self.goal = self.pick_goal()
                 print(f"Setting new goal at {self.goal}")
 
-
-        self.max_steps = 100
+        # Scale max steps based on the number of goals - minimum 100 steps
+        self.max_steps = max(30 * min(self.curriculum_points, config.N_points) if config.N_points > 0 else 100, 100)
         self.current_step = 0
+        self.distances = []
+        self.episode_rewards = 0  # Track total rewards for curriculum advancement
 
     def init_nn(self):
         """
@@ -81,13 +96,20 @@ class SimRobotEnv(gym.Env):
         self.scaler_deltas.min_ = scalers['deltas_min']
         self.scaler_deltas.scale_ = scalers['deltas_scale']
 
+        # Check if CUDA is available and set device accordingly
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
+
         # Load model
         model_path = r"data/exp_2025-04-04_19-17-42/volume_net.pth"
         self.model = VolumeNet(input_dim=3, output_dim=3)
-        self.model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+
+        # Load state dict to the appropriate device
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        
+        # Move model to device and set to evaluation mode
+        self.model = self.model.to(self.device)
         self.model.eval()
-
-
 
     def get_goal(self):
         return self.goal
@@ -96,15 +118,21 @@ class SimRobotEnv(gym.Env):
         """
         Pick a random goal within the workspace.
         """
-        # return sample_point_in_hull(self.convex_hull, num_samples=1)[0]
-        # Get the vertices from the convex hull - these are points from the original point cloud
-        hull_vertices = self.convex_hull.points
-        
         # Pick a random index
-        random_index = np.random.randint(0, len(hull_vertices))
-        
+        random_index = np.random.randint(0, len(self.point_cloud))
+                
         # Return the randomly selected point
-        return hull_vertices[random_index]
+        return self.point_cloud[random_index]
+    
+    def pick_goals(self, num_goals):
+        """
+        Pick a fixed number of random goals within the workspace.
+        """
+        goals = []
+        for _ in range(num_goals):
+            goal = self.pick_goal()
+            goals.append(goal)
+        return np.array(goals)
     
     def pick_trajectory(self):
         # Build a trajectory starting from the tip position to the goal position
@@ -169,10 +197,27 @@ class SimRobotEnv(gym.Env):
         # Initialize trajectory tracking
         self.current_trajectory_index = 0
         self.goal = self.spline_points[self.current_trajectory_index]
-        
-        # Create interactive 3D visualization
-        # self.save_interactive_3d_visualization(self.trajectory_points, self.spline_points)
 
+    def pick_smart_goals(self, num_goals):
+        """Pick a sequence of goals that form a logical path."""
+        goals = []
+        
+        # Start from the current tip position
+        last_point = self.tip.copy()
+        
+        for _ in range(num_goals):
+            # Sample several candidate points
+            candidates = [self.pick_goal() for _ in range(10)]
+            
+            # Pick the one that's closest to the last point but still far enough to be interesting
+            distances = [np.linalg.norm(c - last_point) for c in candidates]
+            best_idx = np.argmin([abs(d - 2.0) for d in distances])  # Try to maintain ~2.0 distance
+            
+            next_point = candidates[best_idx]
+            goals.append(next_point)
+            last_point = next_point
+        
+        return np.array(goals)
 
     def predict_tip(self, command):
         """
@@ -189,23 +234,25 @@ class SimRobotEnv(gym.Env):
         # Scale inputs
         volumes_scaled = self.scaler_volumes.transform(volumes_2d)
 
-        # Convert to tensor
-        volumes_tensor = torch.tensor(volumes_scaled, dtype=torch.float32)
+        # Convert to tensor and move to the appropriate device (GPU if available)
+        volumes_tensor = torch.tensor(volumes_scaled, dtype=torch.float32).to(self.device)
 
         # Make predictions
         with torch.no_grad():
-            predictions_scaled = self.model(volumes_tensor).numpy()
+            # Run the model on the device (GPU if available)
+            predictions_tensor = self.model(volumes_tensor)
+            # Move results back to CPU for numpy conversion
+            predictions_scaled = predictions_tensor.cpu().numpy()
 
         # Inverse transform predictions
         predictions = self.scaler_deltas.inverse_transform(predictions_scaled)
         return predictions[0]
 
-
     def set_goal(self, goal):
         self.goal = goal
 
     def step(self, action):
-        # Action is now directly a continuous vector [motor1, motor2, motor3, elongation]
+        # Actions [motor1, motor2, motor3, elongation (3 motors combined)]
         elongation = action[3]
         
         # Create a new command vector with the first 3 actions adjusted by elongation
@@ -215,85 +262,121 @@ class SimRobotEnv(gym.Env):
             combined_action = min(action[i] + elongation, config.max_stroke)
             command[i] = max(0, combined_action)  # Ensure non-negative
         
-
         self.tip = self.predict_tip(command)
         distance = np.linalg.norm(self.tip - self.goal)
+        self.distances = np.append(self.distances, distance)
         terminated = False
         self.current_step += 1
-        reward = 0
-
-        # Same as paper
-        reward = -distance  
-
-        ## Old way
-        # distance_threshold = 1.9
         
-        # if distance > distance_threshold:
-        #     # terminated = True
-        #     # reward = 0
-        #     reward -= 1  # Negative reward for being too far from the goal
-        # bonus = 0
-
-        # # Check 3d points alignment with the goal
-        # # Compute perpendicular distance from goal to the line defined by the origin and the tip.
-        # dist_to_line = np.linalg.norm(np.cross(self.tip, self.goal)) / np.linalg.norm(self.tip)
-
-        # # If the goal lies nearly on the line, add a bonus reward.
-        # if dist_to_line < 0.7 and np.linalg.norm(self.goal) > np.linalg.norm(self.tip):
-        #     bonus += 5
-        #     if distance < 0.5:
-        #         bonus += 10
-        #         if distance < 0.2:
-        #             bonus += 20
-        #             if distance < 0.1:
-        #                 bonus += 50
-
-        # if not terminated:
-        #     # reward = 1/(distance*(self.current_step**2)) + bonus
-        #     reward = 1/(0.5*distance+0.0001) + bonus
-
-        ## New way (DONT USE)
-        # if distance < 0.5:
-        #     reward += 1
-        #     if distance < 0.5:
-        #         reward += 2
-        #         if distance < 0.2:
-        #             reward += 4
-        # if distance < 1.0:
-        #     reward += 1 / (distance**2)  # Inverse distance reward
-            # self.goal = self.pick_goal()
-            # print(f"Setting new goal at {self.goal}")
-
-        print(f"Step {self.current_step}: Distance {distance} ")
+        # Base reward is negative distance
+        reward = -distance
+        
+        # Truncate episode if we exceed max steps
         truncated = self.current_step >= self.max_steps  # episode timeout
         info = {"step": self.current_step, "distance": distance}
 
+        # Handle trajectory-based training
         if config.use_trajectory:
-            # Check if we are at the end of the trajectory
+            # Existing trajectory code
             if self.current_trajectory_index < len(self.spline_points) - 1:
-                # Move to the next point in the trajectory
                 self.goal = self.spline_points[self.current_trajectory_index]
                 self.current_trajectory_index += 1
             else:
-                # If we reached the end of the trajectory, set terminated to True
                 terminated = True
                 print("Reached the end of the trajectory. Picking new one")
                 self.pick_trajectory()
-                self.current_trajectory_index = 0  # Reset trajectory index
-
-        return self.tip, reward, terminated, truncated, info
+                self.current_trajectory_index = 0
+        
+        # Handle multi-goal training
+        elif config.N_points > 0:
+            # Calculate average distance over last 10 steps 
+            window_size = min(10, len(self.distances))
+            avg_distance = np.mean(self.distances[-window_size:])
+            
+            # Progress ratio (how far along the sequence we are)
+            progress_ratio = self.current_trajectory_index / len(self.goals)
+            
+            # If we're close enough to the current goal
+            if avg_distance < 0.5:
+                # Add progress-based bonus reward (higher rewards for later goals)
+                progress_bonus = 10.0 * (1.0 + progress_ratio)
+                reward += progress_bonus
+                
+                # Move to the next goal
+                print(f"Reached goal {self.current_trajectory_index} with distance {distance}. Moving to next one")
+                self.current_trajectory_index += 1
+                
+                if self.current_trajectory_index < len(self.goals):
+                    # We still have more goals in this sequence
+                    self.goal = self.goals[self.current_trajectory_index]
+                else:
+                    # Completed all goals in the sequence
+                    self.success_counter += 1
+                    reward += 50.0  # Major bonus for completing all goals
+                    print(f"\033[32m COMPLETED ALL {len(self.goals)} GOALS! Success counter: {self.success_counter}/{self.success_threshold} \033[0m")
+                    
+                    # Check if we should advance curriculum
+                    if self.success_counter >= self.success_threshold:
+                        old_points = self.curriculum_points
+                        self.curriculum_points = min(self.curriculum_points + 5, config.N_points)
+                        self.success_counter = 0
+                        print(f"\033[33m CURRICULUM ADVANCED: {old_points} -> {self.curriculum_points} points \033[0m")
+                        
+                        # Update max steps for new curriculum level
+                        self.max_steps = max(30 * self.curriculum_points, 100)
+                    
+                    # Reset the trajectory index and pick new goals
+                    self.goals += self.pick_smart_goals(min(self.curriculum_points, config.N_points))
+                    self.goal = self.goals[self.current_trajectory_index]
+        
+        # Store the current action for the next observation
+        self.last_action = action.copy()
+        
+        # Add total rewards for curriculum tracking
+        self.episode_rewards += reward
+        
+        # Create the enhanced observation
+        observation = np.concatenate([
+            self.tip,                # Current tip position (3)
+            self.goal,               # Current goal position (3)
+            [distance],              # Distance to goal (1)
+            self.last_action,        # Last action taken (4)
+        ])
+        
+        return observation, reward, terminated, truncated, info
     
     def reset(self, *, seed=None, options=None):
         print("Resetting environment...")
         super().reset(seed=seed)
         self.current_step = 0
-
+        self.distances = []
+        self.episode_rewards = 0
+        
+        # Reset the last action
+        self.last_action = np.zeros(4, dtype=np.float32)
+        
         if config.pick_random_goal:
-            # Change goal with 20% probability.
+            # Change goal with 40% probability for random goal mode
             if np.random.random() < 0.4:
                 self.goal = self.pick_goal()
                 print(f"Setting new goal at {self.goal}")
-        return self.tip, {}
+        
+        elif config.N_points > 0:
+            # Reset the trajectory index and pick new goals
+            self.current_trajectory_index = 0
+
+        
+        distance = np.linalg.norm(self.tip - self.goal)
+
+        # Create the observation
+        observation = np.concatenate([
+            self.tip,                # Current tip position (3)
+            self.goal,               # Current goal position (3)
+            [distance],              # Distance to goal (1)
+            self.last_action,        # Last action taken (4)
+        ])
+        
+        return observation, {}
 
     def render(self, mode='human'):
         pass

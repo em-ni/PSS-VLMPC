@@ -42,6 +42,7 @@ class RobotTrainingMonitor(BaseCallback):
         self.reward_line = None
         self.avg_reward_line = None
         self.distance_line = None
+        self.avg_distance_line = None  # Add this line
         self.live_update_freq = 5  # Update live plot every N episodes
         
         # Output directory setup
@@ -75,7 +76,9 @@ class RobotTrainingMonitor(BaseCallback):
         self.ax2.set_title('Distance to Goal')
         self.ax2.set_xlabel('Episode')
         self.ax2.set_ylabel('Distance')
-        self.distance_line, = self.ax2.plot([], [], 'g-', linewidth=1.5)
+        self.distance_line, = self.ax2.plot([], [], 'g-', alpha=0.5, label='Raw Distance')
+        self.avg_distance_line, = self.ax2.plot([], [], 'm-', linewidth=2, label='Avg Distance')
+        self.ax2.legend()
         self.ax2.grid(True, alpha=0.3)
         
         plt.tight_layout()
@@ -96,19 +99,26 @@ class RobotTrainingMonitor(BaseCallback):
             
         # Update distance plot if we have distance data
         if len(self.distances_to_goal) > 0:
-            # We'll plot average distance per episode
+            # Calculate average distance per episode
             avg_distances = []
+            raw_distances = []  # Will store the end distance for each episode
             episode_start = 0
+            
             for length in self.episode_lengths:
                 episode_end = episode_start + length
                 if episode_end <= len(self.distances_to_goal):
+                    # Calculate average distance for this episode
                     avg_dist = np.mean(self.distances_to_goal[episode_start:episode_end])
                     avg_distances.append(avg_dist)
+                    
+                    # Get the final distance for this episode (raw value)
+                    raw_distances.append(self.distances_to_goal[episode_end-1])
                 episode_start = episode_end
                 
             if len(avg_distances) > 0:
                 ep_range = list(range(1, len(avg_distances) + 1))
-                self.distance_line.set_data(ep_range, avg_distances)
+                self.distance_line.set_data(ep_range, raw_distances)  # Plot raw (final) distances
+                self.avg_distance_line.set_data(ep_range, avg_distances)  # Plot average distances
         
         # Adjust plot limits
         for ax in [self.ax1, self.ax2]:
@@ -135,6 +145,26 @@ class RobotTrainingMonitor(BaseCallback):
             self.rolling_rewards_100.append(np.mean(self.episode_rewards[-100:]))
         else:
             self.rolling_rewards_100.append(np.mean(self.episode_rewards))
+        
+        # Calculate average distance per episode
+        if len(self.distances_to_goal) > 0:
+            avg_distances = []
+            final_distances = []
+            episode_start = 0
+            
+            for length in self.episode_lengths:
+                episode_end = episode_start + length
+                if episode_end <= len(self.distances_to_goal):
+                    # Calculate average distance for this episode
+                    avg_dist = np.mean(self.distances_to_goal[episode_start:episode_end])
+                    avg_distances.append(avg_dist)
+                    
+                    # Get the final distance for this episode
+                    final_distances.append(self.distances_to_goal[episode_end-1])
+                episode_start = episode_end
+                
+            self.episode_avg_distances = avg_distances
+            self.episode_final_distances = final_distances
             
         self.timestamps.append(time.time() - self.start_time)
         self.timesteps_history.append(self.num_timesteps)
@@ -149,18 +179,29 @@ class RobotTrainingMonitor(BaseCallback):
             'time_elapsed': self.timestamps,
             'rolling_reward_10': self.rolling_rewards_10,
             'rolling_reward_50': self.rolling_rewards_50,
-            'rolling_reward_100': self.rolling_rewards_100
+            'rolling_reward_100': self.rolling_rewards_100,
         })
+        
+        # Add distance metrics if available
+        if hasattr(self, 'episode_avg_distances') and len(self.episode_avg_distances) > 0:
+            # Make sure the arrays are the same length by padding with NaN if needed
+            if len(self.episode_avg_distances) < len(self.episode_rewards):
+                padding = [np.nan] * (len(self.episode_rewards) - len(self.episode_avg_distances))
+                metrics_df['avg_distance'] = self.episode_avg_distances + padding
+                metrics_df['final_distance'] = self.episode_final_distances + padding
+            else:
+                metrics_df['avg_distance'] = self.episode_avg_distances[:len(self.episode_rewards)]
+                metrics_df['final_distance'] = self.episode_final_distances[:len(self.episode_rewards)]
         
         metrics_df.to_csv(os.path.join(self.output_dir, 'training_metrics.csv'), index=False)
         
     def _generate_plots(self):
-        # Create plots
-        plt.figure(figsize=(15, 10))
+        # Create plots with more comprehensive metrics
+        plt.figure(figsize=(15, 15))  # Increased size for more plots
         
         # Plot 1: Episode rewards
-        plt.subplot(2, 2, 1)
-        plt.plot(self.episode_rewards, label='Episode Reward')
+        plt.subplot(3, 2, 1)
+        plt.plot(self.episode_rewards, label='Episode Reward', alpha=0.5)
         if len(self.rolling_rewards_10) > 0:
             plt.plot(self.rolling_rewards_10, label='10-ep avg', linewidth=2)
         if len(self.rolling_rewards_50) > 0:
@@ -173,16 +214,27 @@ class RobotTrainingMonitor(BaseCallback):
         plt.legend()
         plt.grid(True, alpha=0.3)
         
-        # Plot 2: Episode lengths
-        plt.subplot(2, 2, 2)
+        # Plot 2: Distance metrics
+        plt.subplot(3, 2, 2)
+        if hasattr(self, 'episode_avg_distances') and len(self.episode_avg_distances) > 0:
+            plt.plot(self.episode_final_distances, 'g-', alpha=0.5, label='Final Distance')
+            plt.plot(self.episode_avg_distances, 'm-', linewidth=2, label='Avg Distance')
+            plt.xlabel('Episode')
+            plt.ylabel('Distance')
+            plt.title('Goal Distance Metrics')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+        
+        # Plot 3: Episode lengths
+        plt.subplot(3, 2, 3)
         plt.plot(self.episode_lengths)
         plt.xlabel('Episode')
         plt.ylabel('Steps')
         plt.title('Episode Lengths')
         plt.grid(True, alpha=0.3)
         
-        # Plot 3: Reward vs Timesteps
-        plt.subplot(2, 2, 3)
+        # Plot 4: Reward vs Timesteps (learning curve)
+        plt.subplot(3, 2, 4)
         plt.plot(self.timesteps_history, self.episode_rewards, alpha=0.5)
         if len(self.rolling_rewards_10) > 0:
             plt.plot(self.timesteps_history, self.rolling_rewards_10, linewidth=2)
@@ -191,9 +243,9 @@ class RobotTrainingMonitor(BaseCallback):
         plt.title('Reward vs Timesteps')
         plt.grid(True, alpha=0.3)
         
-        # Plot 4: Training Speed
+        # Plot 5: Training Speed
         if len(self.timestamps) > 1:
-            plt.subplot(2, 2, 4)
+            plt.subplot(3, 2, 5)
             # Calculate timesteps per second
             timesteps = np.array(self.timesteps_history)
             times = np.array(self.timestamps)
@@ -209,7 +261,21 @@ class RobotTrainingMonitor(BaseCallback):
                 plt.plot(range(window_size, len(timesteps)), steps_per_sec)
                 plt.xlabel('Episode')
                 plt.ylabel('Steps/second')
-                plt.title('Training Speed')
+                plt.title('Training Speed (Large Network Performance)')
+                plt.grid(True, alpha=0.3)
+        
+        # Plot 6: Distance vs Reward correlation
+        if hasattr(self, 'episode_avg_distances') and len(self.episode_avg_distances) > 0:
+            plt.subplot(3, 2, 6)
+            # Take min length to avoid index errors
+            min_len = min(len(self.episode_rewards), len(self.episode_avg_distances))
+            if min_len > 0:
+                plt.scatter(self.episode_avg_distances[:min_len], self.episode_rewards[:min_len], 
+                           alpha=0.5, c=range(min_len), cmap='viridis')
+                plt.colorbar(label='Episode')
+                plt.xlabel('Average Distance')
+                plt.ylabel('Reward')
+                plt.title('Distance vs Reward Correlation')
                 plt.grid(True, alpha=0.3)
         
         plt.tight_layout()
