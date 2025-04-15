@@ -247,6 +247,13 @@ def plot_results(state_history, control_history, delta_ref_trajectory, point_clo
     # --- Figure 2: 3D Trajectory Plot ---
     fig2 = plt.figure(figsize=(10, 8))
     ax3d = fig2.add_subplot(111, projection='3d')
+    ax3d.set_xlabel("X")
+    ax3d.set_ylabel("Y")
+    ax3d.set_zlabel("Z")
+    ax3d.set_xlim(-1, 5)
+    ax3d.set_ylim(-5, 5)
+    ax3d.set_zlim(-5, 5)
+    ax3d.view_init(elev=-50, azim=-100, roll=-80)
 
     # Plot Point Cloud (optional, can be slow if large)
     if point_cloud is not None and len(point_cloud) > 0:
