@@ -1,6 +1,8 @@
-from stable_baselines3 import A2C, PPO
+from stable_baselines3 import PPO
 from sb3_contrib import TRPO
 from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.utils import set_random_seed
 import threading
 import signal
 import matplotlib.pyplot as plt
@@ -10,7 +12,7 @@ import src.config as config
 from src.robot_env import RobotEnv
 from src.rl_train_monitor import RobotTrainingMonitor
 from src.sim_robot_env import SimRobotEnv
-from src.mpc_sim_env import MpcSimEnv
+# from src.mpc_sim_env import MpcSimEnv
 from utils.circle_arc import calculate_circle_through_points
 import argparse
 import torch
@@ -51,25 +53,32 @@ if __name__ == '__main__':
                         help="Path to the trained policy model (required for test mode, optional for train mode)")
     parser.add_argument("--sim", action="store_true", 
                         help="Use simulated environment instead of real robot")
-    # parser.add_argument("--nn_path", type=str,
-    #                     help="Path to the neural network model (required when --sim is used)")
-    # parser.add_argument("--csv_path", type=str,
-    #                     help="Path to the CSV file with collected data")
     args = parser.parse_args()
 
     # Validate that model_path is provided when mode is test
     if args.mode == "test" and not args.model_path:
         parser.error("--model_path is required when mode is test")
-        
-    # # Validate that nn_path is provided when sim is used
-    # if args.sim and not args.nn_path:
-    #     parser.error("--nn_path is required when using simulation (--sim)")
 
     if args.sim:
         # Create a simulated environment with the neural network model
         print("Using simulated environment")
-        # env = SimRobotEnv()
-        env = MpcSimEnv()
+        
+        # Define environment creation function
+        def make_env(rank, seed=0):
+            def _init():
+                env = SimRobotEnv()  # or MpcSimEnv()
+                env.reset(seed=seed + rank)
+                return env
+            set_random_seed(seed)
+            return _init
+            
+        # Number of parallel environments
+        n_envs = 24
+        
+        # Create vectorized environment
+        print(f"Creating {n_envs} vectorized environments")
+        env = SubprocVecEnv([make_env(i) for i in range(n_envs)])
+        
 
     else:
         # Create a real robot environment.
@@ -91,21 +100,27 @@ if __name__ == '__main__':
         # Determine algorithm type
         algorithm = "TRPO"
         # algorithm = "PPO" 
-
+        
+        # Steps
+        checkpoint_steps = 1000000 
+        total_training_steps = 10000000 # Total training steps
+        total_n_steps = 2048 # Total steps before updating the policy
+        n_envs = getattr(env, "num_envs", 1)  
+        steps_per_env = total_n_steps // n_envs  
+        
         model_trpo = TRPO(
-            policy=FixedTRPOPolicy,  # Keep using our custom policy class
+            policy=FixedTRPOPolicy, 
             env=env, 
             policy_kwargs=dict(
-                # Much larger network architecture - adjust both pi (policy) and vf (value function) networks
                 net_arch=dict(
-                    # Policy network - 5 layers with increasing capacity
-                    pi=[512, 512, 384, 256, 128],
-                    # Value network - 5 layers with increasing capacity
-                    vf=[512, 512, 384, 256, 128]
+                    # Policy network
+                    pi=[256, 128],
+                    # Value network
+                    vf=[256, 128]
                 ),
                 activation_fn=torch.nn.ReLU
             ),
-            # Keep these parameters the same
+            n_steps=steps_per_env, 
             cg_max_steps=20,        
             cg_damping=0.12,        
             target_kl=0.015,        
@@ -185,7 +200,7 @@ if __name__ == '__main__':
         
         # Create the checkpoint callback
         checkpoint_callback = CheckpointCallback(
-            save_freq=100000, 
+            save_freq=checkpoint_steps, 
             save_path=checkpoint_dir,
             name_prefix="robot_model",
             save_replay_buffer=True,
@@ -196,7 +211,7 @@ if __name__ == '__main__':
         metrics_callback = RobotTrainingMonitor()
         
         # Use both callbacks during training
-        model.learn(total_timesteps=10000000, callback=[metrics_callback, checkpoint_callback])
+        model.learn(total_timesteps=total_training_steps, callback=[metrics_callback, checkpoint_callback])
         
         print("\n--- Training complete. Starting evaluation ---")
 
@@ -232,13 +247,29 @@ if __name__ == '__main__':
     def test(env):
         """Load and test a pre-trained RL policy."""
         # Load the trained policy
+        algorithm = "PPO" # Default or detect from path
+        if args.model_path:
+            if "trpo" in args.model_path.lower():
+                algorithm = "TRPO"
+            elif "ppo" in args.model_path.lower():
+                algorithm = "PPO"
+            # Add other algorithms if needed
+
         try:
-            model = A2C.load(args.model_path)
-            print("Loaded A2C policy")
+            if algorithm == "TRPO":
+                # Use the custom policy if needed when loading
+                model = TRPO.load(args.model_path, env=env, policy_class=FixedTRPOPolicy, device=device) # Add device if needed/possible
+                print("Loaded TRPO policy")
+            elif algorithm == "PPO":
+                model = PPO.load(args.model_path, env=env, device=device) # Add device if needed/possible
+                print("Loaded PPO policy")
+            else:
+                # Handle A2C or others if you train them
+                print(f"Algorithm type {algorithm} loading not fully implemented in test")
+
         except Exception as e:
-            print(f"Failed to load policy: {e}")
+            print(f"Failed to load {algorithm} policy from {args.model_path}: {e}")
             return
-        
         # Run the policy in a continuous loop
         episode_count = 0
         
@@ -246,12 +277,19 @@ if __name__ == '__main__':
             episode_count += 1
             print(f"Starting episode {episode_count}")
             
-            # Handle different reset return types
+            # For vectorized environments, we only need the first environment's observation
             reset_result = env.reset()
             if isinstance(reset_result, tuple):
                 obs = reset_result[0]
             else:
                 obs = reset_result
+                
+            # For vectorized environments, extract the first observation
+            if hasattr(env, 'num_envs') and env.num_envs > 1:
+                if isinstance(obs, dict):  # Dictionary observation
+                    obs = {k: v[0] for k, v in obs.items()}
+                else:  # Array observation
+                    obs = obs[0]
             
             done = False
             episode_reward = 0

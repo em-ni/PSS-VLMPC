@@ -5,8 +5,9 @@ import numpy as np
 
 new_experiment = False
 
+# --- Data collection settings ---
 # Cameras
-print("\n\nIMPORTANT: Check if the camera indexes are correct every time you run the code.\n\n")
+if new_experiment: print("\n\nIMPORTANT: Check if the camera indexes are correct every time you run the code.\n\n")
 cam_left_index = 0
 cam_right_index = 3
 P_left_yaml = os.path.abspath(os.path.join("calibration", "calibration_images_camleft_640x480p", "projection_matrix.yaml"))
@@ -72,7 +73,11 @@ axis_mapping = {
 UDP_IP = "127.0.0.1"
 UDP_PORT = 25000
 
-# NN
+# Path to volume inputs (to be used in explorer.move_from_csv)
+input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
+# ---------------------------------
+
+# --- Kinematic Neural Network Model settings ---
 # If we are focusing on pressures only, output dimension = 3.
 pressure_only = False
 if pressure_only:
@@ -91,19 +96,21 @@ total_features = n_features_tau + n_features_x
 output_dim = n_features_x
 lstm_hidden_units = 64
 lstm_num_layers = 2    
+# ---------------------------------
 
-# Path to volume inputs (to be used in explorer.move_from_csv)
-input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
-
-# RL goal
-pick_random_goal = True
-use_trajectory = False
-N_points = 0
+# --- RL settings ---
+N_points = 10
 rl_goal = np.array([2.5, 1.7, 1.0], dtype=np.float32)
+# -------------------------------
 
-# MPC parameters
-STATE_DIM = 3; CONTROL_DIM = 3; VOLUME_DIM = 3
-DT = 0.1; T_SIM = 10.0; N_sim_steps = int(T_SIM / DT)
+# --- MPC settings ---
+STATE_DIM = 3
+CONTROL_DIM = 3
+VOLUME_DIM = 3
+DT = 0.01
+T_SIM = 3.0
+N_sim_steps = int(T_SIM / DT)
+N_WAYPOINTS = 3
 
 U_MAX_CMD = float(max_stroke)
 U_MIN_CMD = 0
@@ -118,7 +125,12 @@ Q_WEIGHT = 1e6
 R_WEIGHT = 0
 Q_matrix = np.diag([Q_WEIGHT] * STATE_DIM)
 R_matrix = np.diag([R_WEIGHT] * VOLUME_DIM)
+Q_terminal_matrix = np.diag([Q_WEIGHT] * STATE_DIM)
+R_DELTA_V_WEIGHT = 0
+R_delta_matrix = np.diag([R_DELTA_V_WEIGHT] * VOLUME_DIM)
+N_HORIZON = 1
 
 OPTIMIZER_METHOD = 'trust-constr' # 'SLSQP', 'L-BFGS-B', 'TNC' are also options but not good
-PERTURBATION_SCALE = 0.05
+PERTURBATION_SCALE = 0.005
+# ---------------------------------
 

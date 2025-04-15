@@ -4,7 +4,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import os
 from tests.test_blob_sampling import load_point_cloud_from_csv 
-from utils.mpc_functions import predict_delta_from_volume, solve_for_optimal_volume
+from utils.mpc_functions import predict_delta_from_volume
 from utils.traj_functions import generate_snapped_trajectory
 from utils.nn_functions import load_model_and_scalers
 from sklearn.gaussian_process import GaussianProcessRegressor

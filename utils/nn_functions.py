@@ -9,8 +9,8 @@ from src.nn_model import VolumeNet
 
 
 def load_model_and_scalers(model_path, scalers_path):
-    print(f"Loading model from: {model_path}")
-    print(f"Loading scalers from: {scalers_path}")
+    # print(f"Loading model from: {model_path}")
+    # print(f"Loading scalers from: {scalers_path}")
     try:
         scalers_data = np.load(scalers_path)
         scaler_volumes = MinMaxScaler(); scaler_deltas = MinMaxScaler()
@@ -20,15 +20,15 @@ def load_model_and_scalers(model_path, scalers_path):
                 print(f"FATAL ERROR: Required key '{key}' not found in scaler file '{scalers_path}'. Available keys: {list(scalers_data.keys())}"); return None, None, None, None
         scaler_volumes.min_ = scalers_data['volumes_min']; scaler_volumes.scale_ = scalers_data['volumes_scale']
         scaler_deltas.min_ = scalers_data['deltas_min']; scaler_deltas.scale_ = scalers_data['deltas_scale']
-        print("Scalers loaded and initialized.")
-        print(f"  Volume Scaler Min: {scaler_volumes.min_}"); print(f"  Volume Scaler Scale: {scaler_volumes.scale_}")
-        print(f"  Delta Scaler Min: {scaler_deltas.min_}"); print(f"  Delta Scaler Scale: {scaler_deltas.scale_}")
+        # print("Scalers loaded and initialized.")
+        # print(f"  Volume Scaler Min: {scaler_volumes.min_}"); print(f"  Volume Scaler Scale: {scaler_volumes.scale_}")
+        # print(f"  Delta Scaler Min: {scaler_deltas.min_}"); print(f"  Delta Scaler Scale: {scaler_deltas.scale_}")
         nn_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {nn_device}")
+        # print(f"Using device: {nn_device}")
         model = VolumeNet(input_dim=VOLUME_DIM, output_dim=STATE_DIM)
         model.load_state_dict(torch.load(model_path, map_location=nn_device))
         model = model.to(nn_device); model.eval()
-        print("NN model loaded successfully.")
+        # print("NN model loaded successfully.")
         return model, scaler_volumes, scaler_deltas, nn_device
     except FileNotFoundError: print(f"FATAL ERROR: Model or Scaler file not found.\n  Model: {model_path}\n  Scalers: {scalers_path}"); return None, None, None, None
     except Exception as e: print(f"FATAL ERROR during NN loading: {e}"); import traceback; traceback.print_exc(); return None, None, None, None
