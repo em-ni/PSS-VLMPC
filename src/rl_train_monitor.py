@@ -1,6 +1,5 @@
 from stable_baselines3.common.callbacks import BaseCallback
 import numpy as np
-import matplotlib.pyplot as plt
 import os
 import time
 from datetime import datetime
@@ -8,9 +7,9 @@ import src.config as config
 
 class RobotTrainingMonitor(BaseCallback):
     """
-    Simplified and robust training monitor that maintains a single plot window
+    Robust training monitor with fallback modes and reliable plotting
     """
-    def __init__(self, verbose=1):
+    def __init__(self, verbose=1, plot_frequency=5):
         super(RobotTrainingMonitor, self).__init__(verbose)
         
         # Basic metrics storage
@@ -24,29 +23,40 @@ class RobotTrainingMonitor(BaseCallback):
         self.current_length = 0
         self.current_distances = []
         
-        # Initialize single persistent figure
+        # Plot settings
+        self.plot_frequency = plot_frequency
         self.fig = None
         self.axs = None
+        self.use_interactive = True
         
         # Time tracking
         self.start_time = time.time()
         
         # Output directory
-        self.output_dir = os.path.join(config.data_dir, "training_metrics", 
-                                      f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        self.output_dir = config.METRICS_DIR
         os.makedirs(self.output_dir, exist_ok=True)
         print(f"Training metrics will be saved to: {self.output_dir}")
         
-        # Create the persistent figure immediately
+        # Try to set up plotting
         self._setup_figure()
     
     def _setup_figure(self):
-        """Create a simple, persistent figure with just two subplots"""
+        """Create a simple figure with fallback options"""
         try:
-            # Use TkAgg backend for better interactive performance
-            plt.switch_backend('TkAgg')
+            import matplotlib.pyplot as plt
+            import matplotlib
             
-            # Create figure with just 2 subplots - rewards and distances
+            # Try GUI backends first, then fallback to non-interactive
+            backends_to_try = ['TkAgg', 'Qt5Agg', 'QtAgg', 'WXAgg', 'WebAgg', 'Agg']
+            for backend in backends_to_try:
+                try:
+                    matplotlib.use(backend, force=True)
+                    print(f"Using matplotlib backend: {backend}")
+                    break
+                except Exception as e:
+                    print(f"Backend {backend} failed: {e}")
+            
+            # Create figure with 2 subplots
             self.fig, self.axs = plt.subplots(2, 1, figsize=(10, 8))
             self.fig.canvas.manager.set_window_title('Training Progress')
             
@@ -62,21 +72,39 @@ class RobotTrainingMonitor(BaseCallback):
             self.axs[1].grid(True, alpha=0.3)
             
             plt.tight_layout()
-            plt.ion()  # Interactive mode
-            plt.show(block=False)
-            print("Training monitor initialized with live plot")
+            
+            # Ensure interactive mode is on and show the plot
+            try:
+                plt.ion()  # Interactive mode
+                self.fig.show()  # Force window to appear
+                plt.pause(0.5)  # Longer initial pause to ensure window appears
+                self.use_interactive = True
+                print("Interactive plotting enabled")
+            except Exception as e:
+                print(f"Interactive mode failed: {e}")
+                self.use_interactive = False
+            
+            print("Training monitor plot initialized")
             
         except Exception as e:
-            print(f"WARNING: Could not create training plot: {e}")
+            print(f"WARNING: Could not set up matplotlib plotting: {e}")
+            print("Will save plots to files only")
             self.fig = None
             self.axs = None
+            self.use_interactive = False
     
     def _update_plot(self):
-        """Update the existing plot without creating new figures"""
-        if self.fig is None or self.axs is None:
-            return
+        """Update the plot, with robust fallbacks"""
+        if not self.episode_rewards:
+            return  # Nothing to plot yet
             
         try:
+            import matplotlib.pyplot as plt
+            
+            # If figure doesn't exist, create it
+            if self.fig is None or self.axs is None:
+                self.fig, self.axs = plt.subplots(2, 1, figsize=(10, 8))
+            
             # Clear previous plots
             self.axs[0].clear()
             self.axs[1].clear()
@@ -88,8 +116,8 @@ class RobotTrainingMonitor(BaseCallback):
             # Add rolling average if we have enough episodes
             if len(self.rolling_avg_rewards) > 0:
                 self.axs[0].plot(episodes[-len(self.rolling_avg_rewards):], 
-                                 self.rolling_avg_rewards, 'r-', 
-                                 linewidth=2, label='10-ep Avg')
+                                self.rolling_avg_rewards, 'r-', 
+                                linewidth=2, label='10-ep Avg')
             
             # Plot distances if available
             if self.episode_distances:
@@ -113,29 +141,50 @@ class RobotTrainingMonitor(BaseCallback):
             steps_per_sec = self.num_timesteps / elapsed if elapsed > 0 else 0
             self.fig.suptitle(f'Training Progress - {steps_per_sec:.1f} steps/sec')
             
-            # Update layout and draw
+            # Update layout
             plt.tight_layout()
-            self.fig.canvas.draw_idle()
-            self.fig.canvas.flush_events()
             
-            # Save the current plot
-            plt.savefig(os.path.join(self.output_dir, 'training_progress.png'), dpi=100)
+            # Try to update the interactive plot, if enabled
+            if self.use_interactive:
+                try:
+                    self.fig.canvas.draw()  # More reliable than draw_idle
+                    if hasattr(self.fig.canvas, 'flush_events'):
+                        self.fig.canvas.flush_events()
+                    plt.pause(0.1)  # Longer pause for better visibility
+                    
+                    # Ensure window is visible (sometimes needed on Windows)
+                    if hasattr(self.fig.canvas.manager, 'window'):
+                        if hasattr(self.fig.canvas.manager.window, 'lift'):
+                            self.fig.canvas.manager.window.lift()  # Tk
+                        elif hasattr(self.fig.canvas.manager.window, 'activateWindow'):
+                            self.fig.canvas.manager.window.activateWindow()  # Qt
+                except Exception as e:
+                    print(f"Interactive update failed: {e}")
+                    self.use_interactive = False  # Disable for future updates
+            
+            # Always save to file (works even if interactive fails)
+            filepath = os.path.join(self.output_dir, 'training_progress.png')
+            plt.savefig(filepath, dpi=100)
+            
+            # Log update 
+            episode_num = len(self.episode_rewards)
+            print(f"Updated plot for episode {episode_num} saved to {filepath}")
             
         except Exception as e:
             print(f"WARNING: Failed to update plot: {e}")
     
     def _on_step(self):
-        """Simple step update"""
-        # Get reward and info from environment
-        rewards = self.locals.get("rewards")
-        infos = self.locals.get("infos")
-        dones = self.locals.get("dones")
+        """Process each step update"""
+        # Extract info from training state
+        rewards = self.locals.get("rewards", [0])
+        infos = self.locals.get("infos", [{}])
+        dones = self.locals.get("dones", [False])
         
         # Safely extract reward
-        reward = rewards[0] if rewards is not None and len(rewards) > 0 else 0
+        reward = rewards[0] if len(rewards) > 0 else 0
         
         # Safely extract info
-        info = infos[0] if infos is not None and len(infos) > 0 else {}
+        info = infos[0] if len(infos) > 0 else {}
         
         # Update episode tracking
         self.current_reward += reward
@@ -147,7 +196,7 @@ class RobotTrainingMonitor(BaseCallback):
             self.current_distances.append(distance)
         
         # Episode completed
-        if dones is not None and len(dones) > 0 and dones[0]:
+        if len(dones) > 0 and dones[0]:
             # Record episode stats
             self.episode_rewards.append(self.current_reward)
             self.episode_lengths.append(self.current_length)
@@ -166,15 +215,15 @@ class RobotTrainingMonitor(BaseCallback):
             print(f"\nEpisode {episode_num}: reward={self.current_reward:.2f}, length={self.current_length}")
             print(f"10-ep avg reward: {avg_reward:.2f}")
             
-            # Update plot every episode (or less frequently for better performance)
-            if episode_num % 5 == 0:  # Update every 5 episodes
+            # Update plot periodically
+            if episode_num % self.plot_frequency == 0:
                 self._update_plot()
             
-            # Save CSV every 25 episodes
-            if episode_num % 25 == 0:
+            # Save CSV more frequently than plots
+            if episode_num % 10 == 0:
                 self._save_csv()
             
-            # Reset trackers
+            # Reset trackers for next episode
             self.current_reward = 0
             self.current_length = 0
             self.current_distances = []
@@ -182,7 +231,7 @@ class RobotTrainingMonitor(BaseCallback):
         return True
     
     def _save_csv(self):
-        """Save simple metrics to CSV"""
+        """Save metrics to CSV file"""
         try:
             import pandas as pd
             data = {
@@ -199,21 +248,30 @@ class RobotTrainingMonitor(BaseCallback):
             if self.episode_distances:
                 # Only include if we have distances
                 data['final_distance'] = self.episode_distances + [np.nan] * (len(self.episode_rewards) - len(self.episode_distances))
-                
-            pd.DataFrame(data).to_csv(os.path.join(self.output_dir, 'metrics.csv'), index=False)
+            
+            filepath = os.path.join(self.output_dir, 'metrics.csv')
+            pd.DataFrame(data).to_csv(filepath, index=False)
+            print(f"Metrics saved to {filepath}")
             
         except Exception as e:
             print(f"Failed to save CSV: {e}")
     
     def _on_training_end(self):
         """Clean up on training end"""
-        # Final save
+        # Final saves
         self._update_plot()
         self._save_csv()
         
-        # Save a final high-quality plot
-        if self.fig:
-            plt.savefig(os.path.join(self.output_dir, 'final_training_progress.png'), dpi=150)
-            plt.close(self.fig)
+        try:
+            import matplotlib.pyplot as plt
             
-        print(f"\nTraining complete! Metrics saved to {self.output_dir}")
+            # Save a final high-quality plot
+            if self.fig:
+                final_path = os.path.join(self.output_dir, 'final_training_progress.png')
+                plt.savefig(final_path, dpi=150)
+                print(f"Final plot saved to {final_path}")
+                plt.close(self.fig)
+        except Exception as e:
+            print(f"Failed to save final plot: {e}")
+            
+        print(f"\nTraining complete! All metrics saved to {self.output_dir}")

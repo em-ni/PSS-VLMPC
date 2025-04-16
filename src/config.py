@@ -1,4 +1,5 @@
 import csv
+from datetime import datetime
 import os
 import time
 import numpy as np
@@ -99,8 +100,19 @@ lstm_num_layers = 2
 # ---------------------------------
 
 # --- RL settings ---
-N_points = 10
-rl_goal = np.array([2.5, 1.7, 1.0], dtype=np.float32)
+N_POINTS = 10    # Number of waypoints in the trajectory
+N_ENVS = 24       # Number of environments to run in parallel
+ALGORITHM = "TRPO"
+
+CHECKPOINT_STEPS = 1000000        # Number of steps to save checkpoint
+TOTAL_TRAINING_STEPS = 10000000   # Total training steps
+TOTAL_N_STEPS = 2048              # Total steps before updating the policy
+
+CHECKPOINTS_DIR = os.path.join(data_dir, "rl", "checkpoints")
+POLICY_DIR = os.path.join(data_dir, "rl", "policy", "trained_policy.zip")
+METRICS_DIR = os.path.join(data_dir, "rl", "training_metrics", f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+EVAL_EPISODES = 100
 # -------------------------------
 
 # --- MPC settings ---

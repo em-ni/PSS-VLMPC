@@ -54,15 +54,14 @@ class SimRobotEnv(gym.Env):
         self.max_steps = 1000
         self.current_step = 0
         self.distances = []
-        self.episode_rewards = 0  # Track total rewards for curriculum advancement
 
-        if config.N_points > 0:
+        if config.N_POINTS > 0:
             self.current_trajectory_index = 0
             # Generate a smooth trajectory with the required number of points
             trajectory_points = generate_snapped_trajectory(
                 self.point_cloud,
-                num_waypoints=config.N_points,
-                T_sim=config.N_points * 10.0,
+                num_waypoints=config.N_POINTS,
+                T_sim=config.N_POINTS * 10.0,
                 N_steps=self.max_steps,
                 from_initial_pos=True  # Start from the robot's initial position
             )
@@ -137,9 +136,10 @@ class SimRobotEnv(gym.Env):
         info = {"step": self.current_step, "distance": float(distance)}
 
         # Update goal
-        if config.N_points > 0:
+        if config.N_POINTS > 0:
             if distance < 0.5:
                 # Move to the next goal if the current one is reached
+                reward += 10  # Bonus for reaching the goal
                 self.current_trajectory_index += 1
                 if self.current_trajectory_index < len(self.goals):
                     self.goal = self.goals[self.current_trajectory_index]
@@ -153,9 +153,6 @@ class SimRobotEnv(gym.Env):
         # Store the current action for the next observation
         self.last_action = action.copy()
         
-        # Add total rewards for curriculum tracking
-        self.episode_rewards += reward
-        
         # Create the enhanced observation
         observation = np.concatenate([
             self.tip,                # Current tip position (3)
@@ -167,30 +164,29 @@ class SimRobotEnv(gym.Env):
         return observation, reward, terminated, truncated, info
     
     def reset(self, *, seed=None, options=None):
-        print("Resetting environment...")
+        # print("Resetting environment...")
         super().reset(seed=seed)
         self.current_step = 0
         self.distances = []
-        self.episode_rewards = 0
         
         # Reset the last action
         self.last_action = np.zeros(4, dtype=np.float32)
         
-        if config.N_points > 0:
+        if config.N_POINTS > 0:
             self.goals = generate_snapped_trajectory(
                 self.point_cloud,
-                num_waypoints=config.N_points,
-                T_sim=config.N_points * 10.0,
+                num_waypoints=config.N_POINTS,
+                T_sim=config.N_POINTS * 10.0,
                 N_steps=self.max_steps,
                 from_initial_pos=True  
             )
             self.current_trajectory_index = 0
             self.goal = self.goals[self.current_trajectory_index]
-            print(f"Resetting trajectory")
+            # print(f"Resetting trajectory")
         else:
             self.goal = pick_goal(self.point_cloud)
             self.goals = [self.goal] # Treat as a 1-point trajectory
-            print(f"Resetting to single goal: {self.goal}")
+            # print(f"Resetting to single goal: {self.goal}")
 
 
         # Reset the tip position to the initial position

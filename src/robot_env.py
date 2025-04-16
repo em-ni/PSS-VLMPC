@@ -11,6 +11,7 @@ import pandas as pd
 from scipy.spatial import Delaunay
 from tests.test_blob_sampling import generate_surface, sample_point_in_hull, is_inside_hull, load_point_cloud_from_csv
 
+# TODO: update according to sim robot env
 
 class RobotEnv(gym.Env):
     """
@@ -44,10 +45,9 @@ class RobotEnv(gym.Env):
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
         
         self.tip = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-        if config.pick_random_goal:
-            self.goal = self.pick_goal()
-        else:
-            self.goal = config.rl_goal
+        # if config.pick_random_goal:
+        #     self.goal = self.pick_goal()
+        # else:
         self.max_steps = 100
         self.current_step = 0
         self.robot_api = RealRobotAPI()
