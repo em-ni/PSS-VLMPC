@@ -9,6 +9,7 @@ from utils.nn_functions import load_model_and_scalers
 from utils.mpc_functions import predict_delta_from_volume, solve_mpc_optimization 
 import warnings
 from scipy.optimize import OptimizeWarning
+import pandas as pd
 
 # --- Suppress specific SciPy optimization warnings ---
 # This filters warnings where the message contains "delta_grad == 0.0"
@@ -188,9 +189,56 @@ def run_simulation():
 
     smoothed_state_history = np.array(smoothed_state_history)
 
+    # Save trajectory and control data to CSV
+    save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, "planned_trajectory.csv")
+    
+
     # Pass the smoothed data to the plotting function
     plot_results(state_history, control_history, delta_ref_trajectory, point_cloud, 
                  DT, U_MIN_CMD, U_MAX_CMD, smoothed_control, smoothed_state_history)
+
+def save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, output_path="planned_trajectory.csv"):
+    """
+    Save the reference trajectory and smoothed control inputs to a CSV file.
+    
+    Args:
+        delta_ref_trajectory: Reference trajectory points [N, state_dim]
+        smoothed_control: Smoothed control inputs [M, control_dim]
+        output_path: Output CSV file path
+    """
+    import pandas as pd
+    import os
+    
+    # Ensure arrays are numpy arrays
+    delta_ref = np.array(delta_ref_trajectory)
+    smooth_ctrl = np.array(smoothed_control)
+    
+    # Create column headers
+    ref_headers = [f"ref_delta_{i+1}" for i in range(delta_ref.shape[1])]
+    ctrl_headers = [f"control_{i+1}" for i in range(smooth_ctrl.shape[1])]
+    
+    # Ensure they have matching length (control is one shorter than states)
+    # We'll use the reference points that correspond to the applied controls
+    matching_length = len(smooth_ctrl)
+    matched_ref = delta_ref[:matching_length+1]  # Include target points
+    
+    # Create DataFrame with both trajectory and control data
+    # Each row contains the reference delta and the control to reach it
+    data = {}
+    
+    # Add reference trajectory data
+    for i, header in enumerate(ref_headers):
+        data[header] = matched_ref[1:, i]  # Skip initial state to align with controls
+    
+    # Add control data
+    for i, header in enumerate(ctrl_headers):
+        data[header] = smooth_ctrl[:, i]
+    
+    # Create and save DataFrame
+    df = pd.DataFrame(data)
+    df.to_csv(output_path, index=False)
+    print(f"\nTrajectory and control data saved to {output_path}")
+
 
 def plot_results(state_history, control_history, delta_ref_trajectory, point_cloud, 
                 dt, u_min, u_max, smoothed_control=None, smoothed_state_history=None):

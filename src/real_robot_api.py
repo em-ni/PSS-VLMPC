@@ -20,6 +20,7 @@ class RealRobotAPI:
         # connection.enableAlerts()  # (commented out as in MATLAB)
         device_list = connection.detect_devices()
         print("Found {} devices.".format(len(device_list)))
+        
         print(device_list)
         
         # Get the axis
