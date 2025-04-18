@@ -4,7 +4,11 @@ import os
 import time
 import numpy as np
 
-new_experiment = True
+# TODO: 
+# -fix pressure sensor and start data colelction with each muscle under the same pressure
+# -find a better way to scan the workspace uniformly including elongation
+
+new_experiment = False
 
 # --- Data collection settings ---
 # Cameras
@@ -54,9 +58,9 @@ upper_blue = np.array([140, 255, 255])
 
 # Move settings
 home_first = False
-initial_pos = 118.1
+initial_pos = 116
 steps = 21
-max_stroke = 1.5  # mm
+max_stroke = 3  # mm
 stepSize = max_stroke / steps
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
@@ -85,9 +89,9 @@ if pressure_only:
     output_dim = 3
 else:
     output_dim = 6
-MODEL_PATH = "data/exp_2025-04-16_16-03-15/volume_net.pth"
-SCALERS_PATH = "data/exp_2025-04-16_16-03-15/volume_net_scalers.npz"
-POINT_CLOUD_PATH = "data/exp_2025-04-16_16-03-15/output_exp_2025-04-16_16-03-15.csv"
+MODEL_PATH = "data/04-16_and_04_17/volume_net.pth"
+SCALERS_PATH = "data/04-16_and_04_17/volume_net_scalers.npz"
+POINT_CLOUD_PATH = "data/04-16_and_04_17/dataset.csv"
 
 # LSTM
 sequence_length = 1  # T=3 -> sequence length 4 (t, t-1, t-2, t-3)

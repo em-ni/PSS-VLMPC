@@ -376,6 +376,11 @@ def test_model(args):
     print(f"Test predictions plot saved to {test_plot_path}")
     plt.show()
 
+    # Save predictions to CSV
+    predictions_df = pd.DataFrame(predictions, columns=['pred_delta_x', 'pred_delta_y', 'pred_delta_z'])
+    predictions_df.to_csv(os.path.join(model_dir, "predictions.csv"), index=False)
+    print(f"Predictions saved to {os.path.join(model_dir, 'predictions.csv')}")
+
 def main():
     args = parse_args()
     

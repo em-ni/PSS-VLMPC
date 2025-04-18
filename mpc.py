@@ -190,7 +190,7 @@ def run_simulation():
     smoothed_state_history = np.array(smoothed_state_history)
 
     # Save trajectory and control data to CSV
-    save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, "planned_trajectory.csv")
+    save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, config.TRAJ_DIR)
     
 
     # Pass the smoothed data to the plotting function
