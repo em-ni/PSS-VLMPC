@@ -1,3 +1,4 @@
+import numpy as np
 from sb3_contrib import TRPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -124,10 +125,10 @@ if __name__ == '__main__':
         
         # Create early stopping callback
         early_stopping_callback = EarlyStoppingCallback(
-            distance_threshold=0.1,  # Maximum acceptable distance
+            distance_threshold=0.17,  # Maximum acceptable distance
             consecutive_episodes=50,  # Number of consecutive successful episodes required
-            success_percentage=90,   # Percentage of steps in episode below threshold
-            verbose=1
+            success_percentage=90,    # Percentage of steps in episode below threshold
+            verbose=0
         )
 
         # Train
@@ -146,9 +147,10 @@ if __name__ == '__main__':
         eval_episodes = config.EVAL_EPISODES
         
         for i in range(eval_episodes):
+            print(f"Starting evaluation episode {i+1}/{eval_episodes}", end="\r", flush=True)
             episode_reward = 0
             done = False
-            while not done:
+            while not (done if isinstance(done, bool) else done.all()):  # Handle both scalar and array
                 action, _ = model.predict(obs, deterministic=True)
                 step_result = env.step(action)
                 
@@ -157,10 +159,17 @@ if __name__ == '__main__':
                     obs, reward, done, info = step_result  # Old Gym style
                 else:
                     obs, reward, terminated, truncated, info = step_result  # Gymnasium style
-                    done = terminated or truncated
+                    if isinstance(terminated, bool) and isinstance(truncated, bool):
+                        done = terminated or truncated
+                    else:
+                        # For vectorized environments, combine terminated and truncated arrays
+                        done = np.logical_or(terminated, truncated)
                     
-                episode_reward += reward
-                env.render()
+                episode_reward += reward.sum() if hasattr(reward, 'sum') else reward
+                try:
+                    env.render()
+                except Exception as e:
+                    print(f"Warning: Render failed: {e}")
             
             reset_result = env.reset()
             if isinstance(reset_result, tuple):
