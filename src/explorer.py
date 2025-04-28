@@ -12,12 +12,17 @@ import src.config as config
 # import config as config
 
 class Explorer:
-    def __init__(self, save_dir, csv_path):
+    def __init__(self, save_dir, csv_path, offsets):
         self.cam_left_index = config.cam_left_index
         self.cam_right_index = config.cam_right_index
         self.save_dir = save_dir
         self.output_file = csv_path
         self.pressure_values = []
+        self.offsets = offsets
+        self.initial_pos_1 = config.initial_pos + self.offsets[0]
+        self.initial_pos_2 = config.initial_pos + self.offsets[1]
+        self.initial_pos_3 = config.initial_pos + self.offsets[2]
+        print(f"Initial positions: {self.initial_pos_1}, {self.initial_pos_2}, {self.initial_pos_3}")
         return 
 
     def get_image(self, cam_index, timestamp):
@@ -104,64 +109,70 @@ class Explorer:
                 self.axis_2.home()
                 self.axis_3.home()
 
-            # Move each axis to the minimum position
-            self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            # Move each axis to the initial position
+            self.axis_1.move_absolute(self.initial_pos_1, Units.LENGTH_MILLIMETRES, False)
+            self.axis_2.move_absolute(self.initial_pos_2, Units.LENGTH_MILLIMETRES, False)
+            self.axis_3.move_absolute(self.initial_pos_3, Units.LENGTH_MILLIMETRES, False)
             time.sleep(1)
             
             userInput = input("Enter 2 to continue:\n")
             
             if userInput == '2':
-                i = 1
+                i = 0
                 j = 0
                 k = 0
                 j_flipFlag = 1
                 k_flipFlag = 1
                 stepCounter = 0  
-                
-                position_i = config.initial_pos
-                position_j = config.initial_pos
-                position_k = config.initial_pos
-                
-                while i <= config.steps + 1:
-                    while j <= config.steps:
-                        while k <= config.steps:
-                            if k == 0 and k_flipFlag == -1:
-                                k_flipFlag = -k_flipFlag
+                windowsteps = config.window_steps # Total steps in each window
+                elongationstepSize = config.elongationstepSize  # Step size for elongation
+                elongationstep = 0
+                position_i = self.initial_pos_1
+                position_j = self.initial_pos_2
+                position_k = self.initial_pos_3
+                while elongationstep <= (config.steps-config.window_steps):
+                    print("\r", elongationstep)
+                    while i <= windowsteps + elongationstep:
+                        while j <= windowsteps + elongationstep:
+                            while k <= windowsteps + elongationstep:
+                                if k == elongationstep and k_flipFlag == -1:
+                                    k_flipFlag = -k_flipFlag
+                                    print("\r", i, j, k, " ", end="", flush=True)
+                                    self.step_and_save(position_i, position_j, position_k)
+                                    position_k = self.initial_pos_3 + k * config.stepSize
+                                    stepCounter += 1
+                                    break
+                                if k == windowsteps+elongationstep and k_flipFlag == 1:
+                                    k_flipFlag = -k_flipFlag
+                                    print("\r", i, j, k, " ", end="", flush=True)
+                                    self.step_and_save(position_i, position_j, position_k)
+                                    position_k = self.initial_pos_3 + k * config.stepSize
+                                    stepCounter += 1
+                                    break
                                 print("\r", i, j, k, " ", end="", flush=True)
-                                self.step_and_save(position_i, position_j, position_k)
-                                position_k = config.initial_pos + k * config.stepSize
+                                self.step_and_save(position_i, position_j, position_k)  
+                                position_k = self.initial_pos_3 + k * config.stepSize
+                                k = k + k_flipFlag
                                 stepCounter += 1
+                            if j == elongationstep and j_flipFlag == -1:
+                                j_flipFlag = -j_flipFlag
+                                position_j = self.initial_pos_2 + j * config.stepSize
                                 break
-                            if k == config.steps and k_flipFlag == 1:
-                                k_flipFlag = -k_flipFlag
-                                print("\r", i, j, k, " ", end="", flush=True)
-                                self.step_and_save(position_i, position_j, position_k)
-                                position_k = config.initial_pos + k * config.stepSize
-                                stepCounter += 1
+                            if j == windowsteps+elongationstep and j_flipFlag == 1:
+                                j_flipFlag = -j_flipFlag
+                                position_j = self.initial_pos_2 + j * config.stepSize
                                 break
-                            print("\r", i, j, k, " ", end="", flush=True)
-                            self.step_and_save(position_i, position_j, position_k)  
-                            position_k = config.initial_pos + k * config.stepSize
-                            k = k + k_flipFlag
-                            stepCounter += 1
-                        if j == 0 and j_flipFlag == -1:
-                            j_flipFlag = -j_flipFlag
-                            position_j = config.initial_pos + j * config.stepSize
-                            break
-                        if j == config.steps and j_flipFlag == 1:
-                            j_flipFlag = -j_flipFlag
-                            position_j = config.initial_pos + j * config.stepSize
-                            break
-                        j = j + j_flipFlag
-                        position_j = config.initial_pos + j * config.stepSize
-                    position_i = config.initial_pos + i * config.stepSize
-                    i = i + 1
+                            j = j + j_flipFlag
+                            position_j = self.initial_pos_2 + j * config.stepSize
+                        position_i = self.initial_pos_1 + i * config.stepSize
+                        i = i + 1
+                    j += elongationstepSize
+                    k += elongationstepSize
+                    elongationstep += windowsteps
             
-            self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+            self.axis_1.move_absolute(self.initial_pos_1, Units.LENGTH_MILLIMETRES, False)
+            self.axis_2.move_absolute(self.initial_pos_2, Units.LENGTH_MILLIMETRES, False)
+            self.axis_3.move_absolute(self.initial_pos_3, Units.LENGTH_MILLIMETRES, False)
             time.sleep(0.2)
             print("Finished explorer")
             
@@ -171,57 +182,48 @@ class Explorer:
             
         connection.close()
 
-    def move_from_csv(self):
-        # Open connection on COM3
-        connection = Connection.open_serial_port('COM3')
-        connection.enable_alerts()
-
-        try:
-            # connection.enableAlerts()  # (commented out as in MATLAB)
-            device_list = connection.detect_devices()
-            print("Found {} devices.".format(len(device_list)))
-            print(device_list)
-            
-            # Get the axis
-            self.axis_1 = device_list[0].get_axis(1)
-            self.axis_2 = device_list[1].get_axis(1)
-            self.axis_3 = device_list[2].get_axis(1)
-            
-            # Home each axis if home_first is True
-            if config.home_first: 
-                self.axis_1.home()
-                self.axis_2.home()
-                self.axis_3.home()
-
-            # Move each axis to the minimum position
-            self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            time.sleep(1)
-            
-            userInput = input("Enter 2 to continue:\n")
-            
-            if userInput == '2':
-                with open(config.input_volume_path, mode="r") as csvfile:
-                    reader = csv.DictReader(csvfile)
-                    next(reader)  # Skip the header
-                    for row in reader:
-                        position_i = float(row['volume_1']) + config.initial_pos
-                        position_j = float(row['volume_2']) + config.initial_pos
-                        position_k = float(row['volume_3']) + config.initial_pos
-                        self.step_and_save(position_i, position_j, position_k)
-            
-            self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
-            time.sleep(0.2)
-            print("Finished explorer")
-            
-        except Exception as exception:
-            connection.close()
-            raise exception
-            
-        connection.close()
+    # def move_from_csv(self):
+    #     # Open connection on COM3
+    #     connection = Connection.open_serial_port('COM3')
+    #     connection.enable_alerts()
+    #     try:
+    #         # connection.enableAlerts()  # (commented out as in MATLAB)
+    #         device_list = connection.detect_devices()
+    #         print("Found {} devices.".format(len(device_list)))
+    #         print(device_list)
+    #         # Get the axis
+    #         self.axis_1 = device_list[0].get_axis(1)
+    #         self.axis_2 = device_list[1].get_axis(1)
+    #         self.axis_3 = device_list[2].get_axis(1)
+    #         # Home each axis if home_first is True
+    #         if config.home_first: 
+    #             self.axis_1.home()
+    #             self.axis_2.home()
+    #             self.axis_3.home()
+    #         # Move each axis to the minimum position
+    #         self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+    #         self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+    #         self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+    #         time.sleep(1)
+    #         userInput = input("Enter 2 to continue:\n")
+    #         if userInput == '2':
+    #             with open(config.input_volume_path, mode="r") as csvfile:
+    #                 reader = csv.DictReader(csvfile)
+    #                 next(reader)  # Skip the header
+    #                 for row in reader:
+    #                     position_i = float(row['volume_1']) + config.initial_pos
+    #                     position_j = float(row['volume_2']) + config.initial_pos
+    #                     position_k = float(row['volume_3']) + config.initial_pos
+    #                     self.step_and_save(position_i, position_j, position_k)
+    #         self.axis_1.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+    #         self.axis_2.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+    #         self.axis_3.move_absolute(config.initial_pos, Units.LENGTH_MILLIMETRES, False)
+    #         time.sleep(0.2)
+    #         print("Finished explorer")
+    #     except Exception as exception:
+    #         connection.close()
+    #         raise exception
+    #     connection.close()
 
     def run(self):
         # Listen to the UDP connection in a separate thread
@@ -258,7 +260,7 @@ class Explorer:
         """
 
         # Skip if positions are above the maximum volume
-        if position_i > config.max_vol_1 or position_j > config.max_vol_2 or position_k > config.max_vol_3:
+        if position_i > (config.max_vol_1 + self.offsets[0])  or position_j > (config.max_vol_2 + self.offsets[1]) or position_k > (config.max_vol_3 + self.offsets[2]):
             print("Position is above the maximum volume, skipping")
             return
 

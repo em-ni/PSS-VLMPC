@@ -1,3 +1,4 @@
+from src.pressure_loader import PressureLoader
 from src.tracker import Tracker
 from src.explorer import Explorer
 from src.points_cloud import PointsCloud
@@ -10,8 +11,13 @@ if __name__ == "__main__":
     save_dir = config.save_dir
     csv_path = config.csv_path
 
+    # Load pressure 
+    offsets = []
+    pressure_loader = PressureLoader()
+    offsets = pressure_loader.load_pressure()
+
     # Initialize the classes
-    explorer = Explorer(save_dir, csv_path)
+    explorer = Explorer(save_dir, csv_path, offsets)
     tracker = Tracker(experiment_name, save_dir, csv_path)
     points_cloud = PointsCloud(csv_path)
 

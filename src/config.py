@@ -8,7 +8,7 @@ import numpy as np
 # -fix pressure sensor and start data colelction with each muscle under the same pressure
 # -find a better way to scan the workspace uniformly including elongation
 
-new_experiment = False
+new_experiment = True
 
 # --- Data collection settings ---
 # Cameras
@@ -58,9 +58,11 @@ upper_blue = np.array([140, 255, 255])
 
 # Move settings
 home_first = False
-initial_pos = 116
-steps = 21
-max_stroke = 3  # mm
+initial_pos = 115
+steps = 60
+window_steps = 20 # Windows length in steps
+elongationstepSize = window_steps # To regulate overlap between windows (how much a window is shifted)
+max_stroke = 6  # distance in mm from the initial position to final position
 stepSize = max_stroke / steps
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
