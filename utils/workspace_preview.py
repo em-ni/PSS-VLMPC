@@ -71,13 +71,13 @@ def workspace_preview(w_max_stroke, w_steps, max_stroke):
 if __name__ == "__main__":
 
     # Maximum stroke of the single window
-    w_max_stroke = 2.46238 # mm
+    w_max_stroke = 2.4 # mm
 
     # Number of steps inside the window
     w_steps = 21
 
     # Maximum stroke of the entire system
-    max_stroke = 7.98423 # mm
+    max_stroke = 6 # mm
 
     workspace_preview(w_max_stroke, w_steps, max_stroke)
 

@@ -59,7 +59,7 @@ upper_blue = np.array([140, 255, 255])
 # Move settings
 home_first = False
 initial_pos = 115
-steps = 50
+steps = 50 # Suggestion: use utils/workspace_preview.py 
 window_steps = 25 # Windows length in steps
 elongationstepSize = window_steps # To regulate overlap between windows (how much a window is shifted)
 max_stroke = 5  # distance in mm from the initial position to final position
