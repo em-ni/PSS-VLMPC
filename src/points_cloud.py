@@ -17,6 +17,7 @@ class PointsCloud:
             reader = csv.DictReader(csvfile)  # Use DictReader to read the CSV
             next(reader)  # Skip the header
             for row in reader:
+                print("Processing row number: ", reader.line_num, end="\r", flush=True)
                 # Get the base coordinates
                 base_x = row['base_x']
                 base_y = row['base_y']
@@ -47,6 +48,7 @@ class PointsCloud:
         base_y_avg = sum(float(point[1]) for point in self.base_points) / len(self.base_points)
         base_z_avg = sum(float(point[2]) for point in self.base_points) / len(self.base_points)
         self.base_avg = [base_x_avg, base_y_avg, base_z_avg]
+        print("Done processing points.")
         
         return
     
@@ -58,7 +60,9 @@ class PointsCloud:
         plotter.add_mesh(pv.Sphere(center=[0, 0, 0], radius=0.01), color="yellow")
 
         # Add the tip points to the plot as spheres
+        total_points = len(self.tip_points)
         for diff_point in self.diff:
+            print(f"Adding point number: ", self.diff.index(diff_point), " / {total_points}", end="\r", flush=True)
             diff_point_float = [float(coord) for coord in diff_point]
             plotter.add_mesh(pv.Sphere(center=diff_point_float, radius=0.01), color="red")
         
@@ -71,7 +75,7 @@ class PointsCloud:
 
 
 if __name__ == "__main__":
-    csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\04-16_and_04_17\dataset.csv"
+    csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-04-28_15-58-15\output_exp_2025-04-28_15-58-15.csv"
     points_cloud = PointsCloud(csv_path)
     points_cloud.get_points_from_csv()
     points_cloud.plot_points()

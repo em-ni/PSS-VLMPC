@@ -106,7 +106,7 @@ class PressureLoader:
         offset_3 = 0.0
         while self.pressure_values[0] < self.p_des:
             self.axis_1.move_absolute(config.initial_pos + offset_1, Units.LENGTH_MILLIMETRES, False)
-            time.sleep(2)
+            time.sleep(0.5)
             offset_1 += self.increment
             print(f"Axis 1 position: {config.initial_pos + offset_1} mm, pressure: {self.pressure_values[0]} bar", end="\r", flush=True)
             if offset_1 > config.max_stroke:
@@ -116,7 +116,7 @@ class PressureLoader:
             
         while self.pressure_values[1] < self.p_des:
             self.axis_2.move_absolute(config.initial_pos + offset_2, Units.LENGTH_MILLIMETRES, False)
-            time.sleep(1)
+            time.sleep(0.5)
             offset_2 += self.increment
             print(f"Axis 2: {config.initial_pos + offset_2} mm, pressure: {self.pressure_values[1]} bar", end="\r", flush=True)
             if offset_2 > config.max_stroke:
@@ -126,7 +126,7 @@ class PressureLoader:
             
         while self.pressure_values[2] < self.p_des:
             self.axis_3.move_absolute(config.initial_pos + offset_3, Units.LENGTH_MILLIMETRES, False)
-            time.sleep(1)
+            time.sleep(0.5)
             offset_3 += self.increment
             print(f"Axis 3: {config.initial_pos + offset_3} mm, pressure: {self.pressure_values[2]} bar", end="\r", flush=True)
             if offset_3 > config.max_stroke:

@@ -8,7 +8,7 @@ import numpy as np
 # -fix pressure sensor and start data colelction with each muscle under the same pressure
 # -find a better way to scan the workspace uniformly including elongation
 
-new_experiment = True
+new_experiment = False
 
 # --- Data collection settings ---
 # Cameras
@@ -59,15 +59,15 @@ upper_blue = np.array([140, 255, 255])
 # Move settings
 home_first = False
 initial_pos = 115
-steps = 60
-window_steps = 30 # Windows length in steps
+steps = 50
+window_steps = 25 # Windows length in steps
 elongationstepSize = window_steps # To regulate overlap between windows (how much a window is shifted)
-max_stroke = 6  # distance in mm from the initial position to final position
+max_stroke = 5  # distance in mm from the initial position to final position
 stepSize = max_stroke / steps
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
 max_vol_3 = initial_pos + max_stroke
-init_pressure = 1.0
+init_pressure = 2.0
 
 # Map quanser index to axis index
 axis_mapping = {
@@ -91,9 +91,9 @@ if pressure_only:
     output_dim = 3
 else:
     output_dim = 6
-MODEL_PATH = "data/04-16_and_04_17/volume_net.pth"
-SCALERS_PATH = "data/04-16_and_04_17/volume_net_scalers.npz"
-POINT_CLOUD_PATH = "data/04-16_and_04_17/dataset.csv"
+MODEL_PATH = "data/exp_2025-04-28_15-58-15/volume_net.pth"
+SCALERS_PATH = "data/exp_2025-04-28_15-58-15/volume_net_scalers.npz"
+POINT_CLOUD_PATH = "data/exp_2025-04-28_15-58-15/dataset.csv"
 
 # LSTM
 sequence_length = 1  # T=3 -> sequence length 4 (t, t-1, t-2, t-3)
@@ -149,7 +149,7 @@ R_delta_matrix = np.diag([R_DELTA_V_WEIGHT] * VOLUME_DIM)
 N_HORIZON = 1
 
 OPTIMIZER_METHOD = 'trust-constr' # 'SLSQP', 'L-BFGS-B', 'TNC' are also options but not good
-PERTURBATION_SCALE = 0.005
+PERTURBATION_SCALE = 0.003
 
 TRAJ_DIR = os.path.join(data_dir, "mpc", "planned_trajectory.csv")
 # ---------------------------------

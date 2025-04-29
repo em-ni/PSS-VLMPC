@@ -1,3 +1,4 @@
+import sys
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import pandas as pd
@@ -6,6 +7,8 @@ import threading
 import signal
 import time
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.pressure_loader import PressureLoader
 import src.config as config
 from src.robot_env import RobotEnv
 from utils.circle_arc import calculate_circle_through_points
@@ -49,6 +52,11 @@ def main():
     
     print(f"Loaded reference trajectory with shape {ref_trajectory.shape}")
     print(f"Loaded control inputs with shape {control_inputs.shape}")
+
+    # Load pressure 
+    offsets = []
+    pressure_loader = PressureLoader()
+    offsets = pressure_loader.load_pressure()
     
     # Create robot environment
     env = RobotEnv()
@@ -125,7 +133,10 @@ def main():
             
             # Get control input for current step
             u_command = control_inputs[step]
-            
+
+            # Add offset to control input
+            u_command = u_command + offsets
+
             # Apply control to the robot
             env.robot_api.send_command(u_command)
             print(f"Step {step+1}/{total_steps}: Applying control input {u_command}")            

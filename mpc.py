@@ -239,7 +239,6 @@ def save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, output_path="
     df.to_csv(output_path, index=False)
     print(f"\nTrajectory and control data saved to {output_path}")
 
-
 def plot_results(state_history, control_history, delta_ref_trajectory, point_cloud, 
                 dt, u_min, u_max, smoothed_control=None, smoothed_state_history=None):
     state_history = np.array(state_history)
