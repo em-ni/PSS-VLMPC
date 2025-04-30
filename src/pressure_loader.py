@@ -11,7 +11,7 @@ from zaber_motion.ascii import Connection
 
 
 class PressureLoader:
-    def __init__(self):
+    def __init__(self, save_offsets=False):
         self.p_des = config.init_pressure
         self.pressure_values = [0.0, 0.0, 0.0]
         self.increment = 0.1
@@ -19,6 +19,7 @@ class PressureLoader:
         self.listen = True
         self.sock = None
         self.connection = None
+        self.save_offsets = save_offsets
 
         print("Initializing motors...")
         # Open connection on COM3
@@ -93,6 +94,7 @@ class PressureLoader:
 
     def load_pressure(self):
 
+        print("IMPORTANT: Be sure MATLAB is running and sending pressure data.\n")
         input("Press Enter to move each axis until the desired pressure is reached...")
 
         # Start the UDP listener in a separate thread
@@ -153,6 +155,13 @@ class PressureLoader:
         # Close motors connection
         self.connection.close()
         print("Connection closed.")
+
+        if self.save_offsets:
+            # Save offsets to a file
+            with open(os.path.join(config.offsets_path, "offsets.txt"), "w") as f:
+                f.write(f"offset_1: {offset_1}\n")
+                f.write(f"offset_2: {offset_2}\n")
+                f.write(f"offset_3: {offset_3}\n")
 
         return [offset_1, offset_2, offset_3]
 

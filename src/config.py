@@ -5,8 +5,7 @@ import time
 import numpy as np
 
 # TODO: 
-# -fix pressure sensor and start data colelction with each muscle under the same pressure
-# -find a better way to scan the workspace uniformly including elongation
+# -Check if rl still works after nn refactoring for prediction made as absolute_volume - initial_pos - offsets
 
 new_experiment = False
 
@@ -25,6 +24,7 @@ experiment_name = "exp_" + today + "_" + time_now
 save_dir = os.path.abspath(os.path.join(".", "data", experiment_name))
 csv_path = os.path.abspath(os.path.join(save_dir, f"output_{experiment_name}.csv"))
 data_dir = os.path.abspath(os.path.join(".", "data"))
+offsets_path = os.path.abspath(os.path.join(data_dir, "nn_train_offsets")) # Offsets are saved only after data collection for training
 
 if new_experiment:
     # If they dont exist, create the directories and the csv file
@@ -133,11 +133,13 @@ N_WAYPOINTS = 3
 U_MAX_CMD = float(max_stroke)
 U_MIN_CMD = 0
 
-INITIAL_POS_VAL = float(initial_pos)
+# INITIAL_POS_VAL = float(initial_pos)
+INITIAL_POS_VAL = float(0.0)
 V_MIN_PHYSICAL = INITIAL_POS_VAL + U_MIN_CMD
 V_MAX_PHYSICAL = INITIAL_POS_VAL + U_MAX_CMD
 VOLUME_BOUNDS_LIST = [(V_MIN_PHYSICAL, V_MAX_PHYSICAL)] * VOLUME_DIM
-V_REST = np.array([INITIAL_POS_VAL] * VOLUME_DIM)
+# V_REST = np.array([INITIAL_POS_VAL] * VOLUME_DIM)
+V_REST = np.array([0.0] * VOLUME_DIM)
 
 Q_WEIGHT = 1e6 
 R_WEIGHT = 0

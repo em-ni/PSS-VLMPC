@@ -8,6 +8,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
+from src import config
 from src.nn_model import VolumeNet
 import time
 import json
@@ -41,6 +42,15 @@ def load_and_preprocess_data(csv_path, flip_io=False):
     
     # Extract volumes
     volumes = df[['volume_1', 'volume_2', 'volume_3']].values
+
+    # Subtract saved offsets from volumes
+    if os.path.exists(os.path.join(config.offsets_path, "offsets.txt")):
+        with open(os.path.join(config.offsets_path, "offsets.txt"), "r") as f:
+            offsets = [float(line.split(": ")[1]) + float(config.initial_pos) for line in f.readlines()]
+        volumes -= offsets
+    else:
+        print("Offsets file not found. Using raw volumes.")
+
     
     # Calculate tip-base difference
     df['delta_x'] = df['tip_x'] - df['base_x']

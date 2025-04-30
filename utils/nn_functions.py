@@ -38,9 +38,9 @@ def predict_tip(command, scaler_volumes, scaler_deltas, model, device):
     Predict the tip position based on the command using the neural network model.
     """
     volumes = np.zeros(3, dtype=np.float32)
-    volumes[0] = initial_pos + command[0]
-    volumes[1] = initial_pos + command[1] 
-    volumes[2] = initial_pos + command[2]
+    volumes[0] = command[0]
+    volumes[1] = command[1] 
+    volumes[2] = command[2]
     
     # Reshape to 2D array (1 sample, 3 features) for scikit-learn
     volumes_2d = volumes.reshape(1, -1)

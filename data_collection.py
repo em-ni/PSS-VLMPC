@@ -13,7 +13,7 @@ if __name__ == "__main__":
 
     # Load pressure 
     offsets = []
-    pressure_loader = PressureLoader()
+    pressure_loader = PressureLoader(save_offsets=True)
     offsets = pressure_loader.load_pressure()
 
     # Initialize the classes
