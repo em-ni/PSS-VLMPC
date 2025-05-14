@@ -160,16 +160,21 @@ def solve_mpc_optimization(
 
 
     # --- Set optimizer options ---
-    optim_options = {'disp': False, 'maxiter': 1000}
+    optim_options = {'disp': False, 'maxiter': 1000*1000}
     if method == 'trust-constr':
-        optim_options['gtol'] = 1e-8
-        optim_options['xtol'] = 1e-8
+        optim_options['gtol'] = 1e-10
+        optim_options['xtol'] = 1e-10
         optim_options.pop('eps', None)
     elif method in ['SLSQP', 'L-BFGS-B', 'TNC']:
         optim_options['ftol'] = 1e-8
         optim_options['eps'] = 1.49e-08
         optim_options.pop('gtol', None)
         optim_options.pop('xtol', None)
+    elif method == 'COBYQA':
+        # optim_options['gtol'] = 1e-10
+        # optim_options['xtol'] = 1e-10
+        # optim_options.pop('eps', None)
+        pass
 
     # --- Run Optimization ---
     result = minimize(

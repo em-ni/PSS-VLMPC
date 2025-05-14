@@ -4,7 +4,7 @@ import time
 import os
 from tests.test_blob_sampling import load_point_cloud_from_csv
 import src.config as config
-from utils.traj_functions import generate_denser_point_cloud, generate_snapped_trajectory, pick_goal
+from utils.traj_functions import generate_denser_point_cloud, generate_snapped_trajectory, pick_goal, generate_straight_trajectory, generate_circle_trajectory, generate_spiral_trajectory
 from utils.nn_functions import load_model_and_scalers
 from utils.mpc_functions import predict_delta_from_volume, solve_mpc_optimization 
 import warnings
@@ -65,12 +65,16 @@ def run_simulation():
     if num_traj_waypoints > 1:
         # Generate N_sim_steps + N_horizon steps to have references for the final horizons
         total_ref_steps = N_sim_steps + N_HORIZON
-        delta_ref_trajectory = generate_snapped_trajectory(
-            point_cloud, num_traj_waypoints, T_SIM * (total_ref_steps / N_sim_steps), total_ref_steps, from_initial_pos=True
-        )
+        # delta_ref_trajectory = generate_snapped_trajectory(
+        #     point_cloud, num_traj_waypoints, T_SIM * (total_ref_steps / N_sim_steps), total_ref_steps, from_initial_pos=True
+        # )
+        # delta_ref_trajectory = generate_straight_trajectory(num_points=total_ref_steps, distance=0.5)
+        # delta_ref_trajectory = generate_circle_trajectory(num_points=total_ref_steps, radius=0.65, plane='yz')
+        delta_ref_trajectory = generate_spiral_trajectory(num_points=total_ref_steps, plane='yz', height_change=0.5)
     else:
         # Use a single goal for all steps
         single_goal = pick_goal(point_cloud)
+        print("Generating a single goal trajectory: ", single_goal)
         delta_ref_trajectory = np.tile(single_goal, (N_sim_steps + N_HORIZON, 1)) 
     print(f"Generated reference trajectory with {len(delta_ref_trajectory)} points.")
 
@@ -307,7 +311,7 @@ def plot_results(state_history, control_history, delta_ref_trajectory, point_clo
          # Downsample point cloud for plotting if too large
          plot_pc_step = max(1, len(point_cloud) // 5000) # Aim for ~5000 points
          ax3d.scatter(point_cloud[::plot_pc_step, 0], point_cloud[::plot_pc_step, 1], point_cloud[::plot_pc_step, 2],
-                      c='lightgray', marker='.', s=1, label='Workspace (Sampled)')
+                      c='gray', marker='.', s=1, label='Workspace (Sampled)')
 
     # Plot Reference Trajectory (plot the part corresponding to the simulation length)
     plot_ref_len = num_plot_steps # Match length of state history

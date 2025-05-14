@@ -125,7 +125,7 @@ EVAL_EPISODES = 10
 STATE_DIM = 3
 CONTROL_DIM = 3
 VOLUME_DIM = 3
-DT = 0.01
+DT = 0.1
 T_SIM = 3.0
 N_sim_steps = int(T_SIM / DT)
 N_WAYPOINTS = 3
@@ -141,7 +141,7 @@ VOLUME_BOUNDS_LIST = [(V_MIN_PHYSICAL, V_MAX_PHYSICAL)] * VOLUME_DIM
 # V_REST = np.array([INITIAL_POS_VAL] * VOLUME_DIM)
 V_REST = np.array([0.0] * VOLUME_DIM)
 
-Q_WEIGHT = 1e6 
+Q_WEIGHT = 1e10
 R_WEIGHT = 0
 Q_matrix = np.diag([Q_WEIGHT] * STATE_DIM)
 R_matrix = np.diag([R_WEIGHT] * VOLUME_DIM)
@@ -150,9 +150,129 @@ R_DELTA_V_WEIGHT = 0
 R_delta_matrix = np.diag([R_DELTA_V_WEIGHT] * VOLUME_DIM)
 N_HORIZON = 1
 
-OPTIMIZER_METHOD = 'trust-constr' # 'SLSQP', 'L-BFGS-B', 'TNC' are also options but not good
-PERTURBATION_SCALE = 0.003
+OPTIMIZER_METHOD = 'COBYQA' # 'trust-constr' # 'SLSQP', 'L-BFGS-B', 'TNC' are also options but not good
+# PERTURBATION_SCALE = 0.0065 # for trust-constr
+PERTURBATION_SCALE = 0.1 # for COBYQA
 
 TRAJ_DIR = os.path.join(data_dir, "mpc", "planned_trajectory.csv")
 # ---------------------------------
+
+"""
+Notes on solvers:
+This function `minimize` is a generic interface to various optimization algorithms, likely from `scipy.optimize.minimize`. Here's a breakdown of the different solver methods:
+
+**Derivative-Free Methods:**
+These methods do not require the gradient (Jacobian) or Hessian of the objective function. They are useful when derivatives are difficult or impossible to compute.
+
+*   **'Nelder-Mead'**:
+    *   **Algorithm**: Uses a simplex (a geometric figure in n-dimensions consisting of n+1 vertices) that adapts to the local landscape.
+    *   **Pros**: Simple, can work on non-smooth and noisy functions.
+    *   **Cons**: Can be slow, especially for higher-dimensional problems. May get stuck in local minima. Not guaranteed to converge to a true minimum.
+    *   **Constraints**: Only supports bound constraints if implemented via a wrapper or if the specific version supports it (historically, it was unconstrained).
+
+*   **'Powell'**:
+    *   **Algorithm**: A conjugate direction method. It iteratively minimizes the function along a set of directions, which are updated to be (approximately) conjugate.
+    *   **Pros**: Can be more efficient than Nelder-Mead for smoother, unimodal functions.
+    *   **Cons**: Can be slow for many variables. Does not use gradient information.
+    *   **Constraints**: Primarily for unconstrained problems.
+
+*   **'COBYLA' (Constrained Optimization BY Linear Approximation)**:
+    *   **Algorithm**: Uses linear approximations to the objective function and constraints. It works by iteratively refining a simplex.
+    *   **Pros**: Handles general inequality constraints.
+    *   **Cons**: Can be slow, especially as the number of variables or constraints increases. May not be very accurate.
+    *   **Constraints**: Supports inequality constraints.
+
+*   **'COBYQA' (Constrained Optimization BY Quadratic Approximation)**:
+    *   **Algorithm**: An improvement over COBYLA, using quadratic approximations within a trust-region framework.
+    *   **Pros**: Aims for better performance and accuracy than COBYLA for derivative-free constrained optimization.
+    *   **Cons**: Newer method, might be less battle-tested than COBYLA in some scenarios.
+    *   **Constraints**: Supports bound and linear inequality constraints.
+
+**Gradient-Based Methods:**
+These methods require the gradient (Jacobian) of the objective function. Some also use the Hessian (second derivatives) or approximations of it.
+
+*   **'CG' (Conjugate Gradient)**:
+    *   **Algorithm**: Iteratively finds search directions that are conjugate with respect to the Hessian (for quadratic functions).
+    *   **Pros**: Good for large-scale unconstrained problems as it doesn't require storing a Hessian matrix.
+    *   **Cons**: Can be slower than BFGS for smaller problems. Convergence can be sensitive to the line search.
+    *   **Constraints**: Primarily for unconstrained problems.
+
+*   **'BFGS' (Broyden-Fletcher-Goldfarb-Shanno)**:
+    *   **Algorithm**: A quasi-Newton method. It approximates the inverse Hessian matrix using gradient information from previous iterations.
+    *   **Pros**: Very popular and generally efficient for smooth, unconstrained problems. Good convergence properties.
+    *   **Cons**: Requires storing an approximation of the Hessian (n x n matrix), which can be memory-intensive for very large `n`.
+    *   **Constraints**: Primarily for unconstrained problems.
+
+*   **'Newton-CG' (Newton-Conjugate Gradient)**:
+    *   **Algorithm**: A modified Newton's method where the search direction (Newton step) is found by solving `H*p = -g` (where H is Hessian, p is step, g is gradient) using a conjugate gradient algorithm.
+    *   **Pros**: Can be very fast if the Hessian is available (or Hessian-vector products can be computed efficiently). Good for large problems if Hessian-vector products are used.
+    *   **Cons**: Requires the Hessian (or Hessian-vector products).
+    *   **Constraints**: Primarily for unconstrained problems.
+
+*   **'L-BFGS-B' (Limited-memory BFGS with Bounds)**:
+    *   **Algorithm**: A version of BFGS that approximates the inverse Hessian using only a limited number of past gradients, making it suitable for problems with many variables.
+    *   **Pros**: Memory efficient for large-scale problems. Handles bound constraints.
+    *   **Cons**: May be less accurate or converge slower than BFGS on smaller problems.
+    *   **Constraints**: Supports bound (box) constraints.
+
+*   **'TNC' (Truncated Newton Constrained)**:
+    *   **Algorithm**: A Newton-type algorithm that uses a truncated Newton approach (solving the Newton system approximately) to handle bound constraints.
+    *   **Pros**: Efficient for problems with many variables and simple bound constraints.
+    *   **Cons**: Requires gradients.
+    *   **Constraints**: Supports bound (box) constraints.
+
+*   **'SLSQP' (Sequential Least SQuares Programming)**:
+    *   **Algorithm**: Solves a sequence of quadratic programming subproblems. Uses gradients.
+    *   **Pros**: Versatile; handles both equality and inequality constraints, as well as bounds. Often a good general-purpose constrained optimizer.
+    *   **Cons**: Performance can depend on the problem structure.
+    *   **Constraints**: Supports bound, equality, and inequality constraints.
+
+**Trust-Region Methods:**
+These methods define a "trust region" around the current point where a model of the objective function (often quadratic) is trusted to be accurate. The algorithm then solves a subproblem to find the next step within this region.
+
+*   **'trust-constr'**:
+    *   **Algorithm**: A trust-region algorithm for constrained optimization. Can use various methods to solve the trust-region subproblem.
+    *   **Pros**: Handles general nonlinear constraints (equality and inequality) and bounds. Often robust. Allows for different ways to approximate the Hessian.
+    *   **Cons**: Can be more computationally intensive per iteration than some other methods. Requires gradients and often Hessians (or approximations).
+    *   **Constraints**: Supports bound, equality, and inequality constraints.
+
+*   **'dogleg'**:
+    *   **Algorithm**: A specific trust-region method for unconstrained optimization. It computes the step by choosing between the steepest descent direction and a Newton-like step, forming a "dogleg" path.
+    *   **Pros**: Robust, good for medium-sized unconstrained problems.
+    *   **Cons**: Requires gradients and Hessians.
+    *   **Constraints**: Unconstrained problems.
+
+*   **'trust-ncg' (Trust-Region Newton Conjugate Gradient)**:
+    *   **Algorithm**: Similar to Newton-CG but within a trust-region framework. The Newton step is computed using CG, but constrained to the trust region.
+    *   **Pros**: Good for large-scale unconstrained problems where Hessian-vector products are available.
+    *   **Cons**: Requires gradients and Hessian-vector products.
+    *   **Constraints**: Unconstrained problems.
+
+*   **'trust-exact'**:
+    *   **Algorithm**: A trust-region method that attempts to solve the trust-region subproblem (minimizing a quadratic model within a ball) nearly exactly.
+    *   **Pros**: Can be very accurate.
+    *   **Cons**: Computationally expensive, especially for large problems, as solving the subproblem exactly can be hard. Requires gradients and Hessians.
+    *   **Constraints**: Unconstrained problems.
+
+*   **'trust-krylov'**:
+    *   **Algorithm**: A trust-region method that uses Krylov subspace methods (like Lanczos or CG) to approximately solve the trust-region subproblem.
+    *   **Pros**: Suitable for large-scale unconstrained problems, especially when only Hessian-vector products are available. Balances efficiency and accuracy.
+    *   **Cons**: Requires gradients and Hessian-vector products.
+    *   **Constraints**: Unconstrained problems.
+
+**Key Differences Summarized:**
+
+*   **Derivatives**: Some (Nelder-Mead, Powell, COBYLA, COBYQA) are derivative-free; others require gradients, and some also benefit from Hessians (or Hessian-vector products).
+*   **Constraints**:
+    *   Unconstrained: CG, BFGS, Newton-CG, dogleg, trust-ncg, trust-exact, trust-krylov.
+    *   Bound Constraints: L-BFGS-B, TNC.
+    *   General Constraints: COBYLA (inequality), COBYQA (bound, linear inequality), SLSQP (equality, inequality), trust-constr (equality, inequality).
+*   **Problem Size**:
+    *   Small to Medium: Nelder-Mead, Powell, BFGS, dogleg.
+    *   Large: CG, L-BFGS-B, Newton-CG (with Hessian-vector products), trust-ncg, trust-krylov, trust-constr (can be).
+*   **Robustness vs. Speed**: Derivative-free methods can be more robust to noise but are often slower. Gradient-based methods are faster if derivatives are accurate and cheap to compute. Trust-region methods are often robust.
+*   **Memory**: L-BFGS-B is designed for low memory usage. Methods requiring full Hessian storage (like standard BFGS or some Newton methods if Hessian is dense) can be memory-intensive.
+
+The choice of solver depends heavily on the characteristics of your objective function, the availability of derivatives, the nature of constraints, and the size of the problem.
+"""
 

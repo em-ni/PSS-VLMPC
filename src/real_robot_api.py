@@ -34,6 +34,7 @@ class RealRobotAPI:
             self.axis_2.home()
             self.axis_3.home()
 
+        # TODO: give offsets input from the pressure loader
         input("Press Enter to move each axis to the initial position...")
         self.reset_robot()
         print("Motors initialized.")

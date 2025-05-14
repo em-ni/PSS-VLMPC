@@ -223,4 +223,201 @@ def generate_snapped_trajectory(
 
     return current_snapped_path
 
+def generate_straight_trajectory(distance=1.5, num_points=100, axis='x'):
+    """
+    Generate a straight line trajectory along the specified axis.
+
+    Args:
+        distance (float): The distance to travel along the axis.
+        num_points (int): The number of points in the trajectory.
+        axis (str or int): The axis of movement. Can be 'x' (or 0), 'y' (or 1), or 'z' (or 2).
+
+    Returns:
+        np.ndarray: The generated straight line trajectory.
+    """
+    initial_state = get_initial_state()
+    # print(f"Initial state for straight trajectory: {initial_state}")
+
+    if initial_state is None:
+        print("Warning: Initial state is None in generate_straight_trajectory. Returning empty array.")
+        # Assuming STATE_DIM is 3 based on current usage, otherwise, this needs to be dynamic
+        return np.empty((0, 3))
+
+    # Ensure initial_state has at least 3 dimensions as assumed by indexing
+    if len(initial_state) < 3:
+        print(f"Warning: Initial state has fewer than 3 dimensions: {initial_state}. Returning empty array.")
+        return np.empty((0, 3))
+
+    if num_points <= 0:
+        return np.empty((0, 3))
+    if num_points == 1:
+        return np.array([initial_state[:3]])
+
+    # Determine the axis index
+    axis_map = {'x': 0, 'y': 1, 'z': 2}
+    if isinstance(axis, str):
+        axis_index = axis_map.get(axis.lower())
+        if axis_index is None:
+            raise ValueError("Invalid axis. Must be 'x', 'y', or 'z'.")
+    elif isinstance(axis, int):
+        if axis not in [0, 1, 2]:
+            raise ValueError("Invalid axis index. Must be 0 (x), 1 (y), or 2 (z).")
+        axis_index = axis
+    else:
+        raise TypeError("Axis must be a string ('x', 'y', 'z') or an integer (0, 1, 2).")
+
+    trajectory_points = np.tile(initial_state[:3], (num_points, 1))
     
+    start_value = initial_state[axis_index]
+    end_value = start_value + distance
+    
+    axis_values = np.linspace(start_value, end_value, num_points)
+    trajectory_points[:, axis_index] = axis_values
+    
+    return trajectory_points
+
+def generate_circle_trajectory(radius=0.5, num_points=100, plane='xy'):
+    """
+    Generate a circular trajectory on a specified plane.
+    The circle is centered at the initial state's projection onto that plane.
+
+    Args:
+        radius (float): The radius of the circle.
+        num_points (int): The number of points in the trajectory.
+        plane (str): The plane of the circle. Can be 'xy', 'yz', or 'xz'.
+
+    Returns:
+        np.ndarray: The generated circular trajectory (num_points, 3).
+    """
+    initial_state = get_initial_state()
+
+    if initial_state is None:
+        print("Warning: Initial state is None in generate_circle_trajectory. Returning empty array.")
+        return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+
+    if len(initial_state) < 3:
+        print(f"Warning: Initial state has fewer than 3 dimensions: {initial_state}. Returning empty array.")
+        return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+
+    if num_points <= 0:
+        return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+    if num_points == 1: # A single point doesn't make a circle, return initial state
+        return np.array([initial_state[:3]])
+
+
+    trajectory_points = np.zeros((num_points, 3))
+    angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False) # endpoint=False to avoid duplicate for closed circle
+
+    plane_lower = plane.lower()
+
+    if plane_lower == 'xy':
+        center_x, center_y, const_z = initial_state[0], initial_state[1], initial_state[2]
+        trajectory_points[:, 0] = center_x + radius * np.cos(angles)
+        trajectory_points[:, 1] = center_y + radius * np.sin(angles)
+        trajectory_points[:, 2] = const_z
+    elif plane_lower == 'yz':
+        const_x, center_y, center_z = initial_state[0], initial_state[1], initial_state[2]
+        trajectory_points[:, 0] = const_x
+        trajectory_points[:, 1] = center_y + radius * np.cos(angles)
+        trajectory_points[:, 2] = center_z + radius * np.sin(angles)
+    elif plane_lower == 'xz':
+        center_x, const_y, center_z = initial_state[0], initial_state[1], initial_state[2]
+        trajectory_points[:, 0] = center_x + radius * np.cos(angles)
+        trajectory_points[:, 1] = const_y
+        trajectory_points[:, 2] = center_z + radius * np.sin(angles)
+    else:
+        raise ValueError("Invalid plane. Must be 'xy', 'yz', or 'xz'.")
+
+    return trajectory_points
+
+def generate_spiral_trajectory(
+    radius_start=0.05,
+    radius_end=0.2,
+    height_change=0.1,
+    num_points=100,
+    num_revolutions=2,
+    plane='xy'
+):
+    """
+    Generate a spiral trajectory starting from the initial state.
+    The spiral expands/contracts its radius and changes height over a number of revolutions.
+
+    Args:
+        radius_start (float): The starting radius of the spiral.
+        radius_end (float): The ending radius of the spiral.
+        height_change (float): The total change in height along the axis perpendicular
+                               to the spiral plane. Positive values move "up" or "out"
+                               along that axis, negative values move "down" or "in".
+        num_points (int): The number of points in the trajectory.
+        num_revolutions (float): The number of full revolutions the spiral makes.
+        plane (str): The plane of the spiral's main expansion.
+                     Can be 'xy', 'yz', or 'xz'.
+
+    Returns:
+        np.ndarray: The generated spiral trajectory (num_points, 3).
+    """
+    initial_state = get_initial_state()
+
+    if initial_state is None:
+        print("Warning: Initial state is None in generate_spiral_trajectory. Returning empty array.")
+        return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+
+    if len(initial_state) < 3:
+        print(f"Warning: Initial state has fewer than 3 dimensions: {initial_state}. Returning empty array.")
+        return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+
+    if num_points <= 0:
+        return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+    
+    # For a single point, return the initial position (consistent with other trajectory types)
+    # The spiral starts *at* initial_state[0:3] and evolves from there.
+    # If radius_start is > 0, the first point of the spiral path itself would be offset.
+    # However, for num_points = 1, it's conventional to just return the start.
+    if num_points == 1:
+        return np.array([initial_state[:3]])
+
+    trajectory_points = np.zeros((num_points, 3))
+    
+    # Angles for the spiral
+    # If num_revolutions is 0, this creates a line of points with angle 0.
+    # If num_points is 1, linspace(x,y,1) gives [x] - handled by above check.
+    angles = np.linspace(0, 2 * np.pi * num_revolutions, num_points)
+    
+    # Radii for each point in the spiral
+    radii = np.linspace(radius_start, radius_end, num_points)
+    
+    # Height offsets for each point in the spiral (along the axis perpendicular to the plane)
+    # The spiral starts at the initial_state's height component and changes by height_change.
+    height_offsets = np.linspace(0, height_change, num_points)
+
+    base_point = initial_state[:3]
+    plane_lower = plane.lower()
+
+    if plane_lower == 'xy':
+        # Spiral in XY plane, height changes along Z
+        center_x, center_y, start_z = base_point[0], base_point[1], base_point[2]
+        trajectory_points[:, 0] = center_x + radii * np.cos(angles)
+        trajectory_points[:, 1] = center_y + radii * np.sin(angles)
+        trajectory_points[:, 2] = start_z + height_offsets
+    elif plane_lower == 'yz':
+        # Spiral in YZ plane, "height" (depth) changes along X
+        start_x, center_y, center_z = base_point[0], base_point[1], base_point[2]
+        trajectory_points[:, 0] = start_x + height_offsets # X is the perpendicular axis
+        trajectory_points[:, 1] = center_y + radii * np.cos(angles)
+        trajectory_points[:, 2] = center_z + radii * np.sin(angles)
+    elif plane_lower == 'xz':
+        # Spiral in XZ plane, "height" (width) changes along Y
+        center_x, start_y, center_z = base_point[0], base_point[1], base_point[2]
+        trajectory_points[:, 0] = center_x + radii * np.cos(angles)
+        trajectory_points[:, 1] = start_y + height_offsets # Y is the perpendicular axis
+        trajectory_points[:, 2] = center_z + radii * np.sin(angles)
+    else:
+        raise ValueError("Invalid plane. Must be 'xy', 'yz', or 'xz'.")
+
+    return trajectory_points
+
+
+
+
+
+
