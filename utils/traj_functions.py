@@ -223,7 +223,7 @@ def generate_snapped_trajectory(
 
     return current_snapped_path
 
-def generate_straight_trajectory(distance=1.5, num_points=100, axis='x'):
+def generate_straight_trajectory(distance=1.5, num_points=100, axis='x', start_point=None):
     """
     Generate a straight line trajectory along the specified axis.
 
@@ -231,27 +231,35 @@ def generate_straight_trajectory(distance=1.5, num_points=100, axis='x'):
         distance (float): The distance to travel along the axis.
         num_points (int): The number of points in the trajectory.
         axis (str or int): The axis of movement. Can be 'x' (or 0), 'y' (or 1), or 'z' (or 2).
+        start_point (np.ndarray, optional): A 3-element array specifying the
+                                            x, y, z coordinates of the line's start.
+                                            If None, the start is derived from the
+                                            initial state. Defaults to None.
 
     Returns:
         np.ndarray: The generated straight line trajectory.
     """
-    initial_state = get_initial_state()
-    # print(f"Initial state for straight trajectory: {initial_state}")
+    current_start_point = None
+    if start_point is not None:
+        if not isinstance(start_point, np.ndarray) or start_point.shape != (3,):
+            raise ValueError("start_point must be a 3-element numpy array (x, y, z).")
+        current_start_point = start_point
+    else:
+        initial_state = get_initial_state()
+        print(f"Initial state for straight trajectory: {initial_state}")
+        if initial_state is None:
+            print("Warning: Initial state is None and no start_point provided in generate_straight_trajectory. Returning empty array.")
+            return np.empty((0, 3))
+        if len(initial_state) < 3:
+            print(f"Warning: Initial state has fewer than 3 dimensions: {initial_state} and no start_point provided. Returning empty array.")
+            return np.empty((0, 3))
+        current_start_point = initial_state[:3]
 
-    if initial_state is None:
-        print("Warning: Initial state is None in generate_straight_trajectory. Returning empty array.")
-        # Assuming STATE_DIM is 3 based on current usage, otherwise, this needs to be dynamic
-        return np.empty((0, 3))
-
-    # Ensure initial_state has at least 3 dimensions as assumed by indexing
-    if len(initial_state) < 3:
-        print(f"Warning: Initial state has fewer than 3 dimensions: {initial_state}. Returning empty array.")
-        return np.empty((0, 3))
 
     if num_points <= 0:
         return np.empty((0, 3))
     if num_points == 1:
-        return np.array([initial_state[:3]])
+        return np.array([current_start_point])
 
     # Determine the axis index
     axis_map = {'x': 0, 'y': 1, 'z': 2}
@@ -266,43 +274,53 @@ def generate_straight_trajectory(distance=1.5, num_points=100, axis='x'):
     else:
         raise TypeError("Axis must be a string ('x', 'y', 'z') or an integer (0, 1, 2).")
 
-    trajectory_points = np.tile(initial_state[:3], (num_points, 1))
+    trajectory_points = np.tile(current_start_point, (num_points, 1))
     
-    start_value = initial_state[axis_index]
-    end_value = start_value + distance
+    start_value_on_axis = current_start_point[axis_index]
+    end_value_on_axis = start_value_on_axis + distance
     
-    axis_values = np.linspace(start_value, end_value, num_points)
+    axis_values = np.linspace(start_value_on_axis, end_value_on_axis, num_points)
     trajectory_points[:, axis_index] = axis_values
     
     return trajectory_points
 
-def generate_circle_trajectory(radius=0.5, num_points=100, plane='xy'):
+def generate_circle_trajectory(radius=0.5, num_points=100, plane='xy', center=None):
     """
     Generate a circular trajectory on a specified plane.
-    The circle is centered at the initial state's projection onto that plane.
+    The circle is centered at the provided `center` coordinates or,
+    if not provided, at the initial state's projection onto that plane.
 
     Args:
         radius (float): The radius of the circle.
         num_points (int): The number of points in the trajectory.
         plane (str): The plane of the circle. Can be 'xy', 'yz', or 'xz'.
+        center (np.ndarray, optional): A 3-element array specifying the
+                                       x, y, z coordinates of the circle's center.
+                                       If None, the center is derived from the
+                                       initial state. Defaults to None.
 
     Returns:
         np.ndarray: The generated circular trajectory (num_points, 3).
     """
     initial_state = get_initial_state()
 
-    if initial_state is None:
-        print("Warning: Initial state is None in generate_circle_trajectory. Returning empty array.")
-        return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
-
-    if len(initial_state) < 3:
-        print(f"Warning: Initial state has fewer than 3 dimensions: {initial_state}. Returning empty array.")
-        return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+    if center is None:
+        if initial_state is None:
+            print("Warning: Initial state is None and no center provided in generate_circle_trajectory. Returning empty array.")
+            return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+        if len(initial_state) < 3:
+            print(f"Warning: Initial state has fewer than 3 dimensions ({initial_state}) and no center provided. Returning empty array.")
+            return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
+        center_coords = initial_state[:3]
+    else:
+        if not isinstance(center, np.ndarray) or center.shape != (3,):
+            raise ValueError("Center must be a 3-element numpy array (x, y, z).")
+        center_coords = center
 
     if num_points <= 0:
         return np.empty((0, STATE_DIM if 'STATE_DIM' in globals() else 3))
-    if num_points == 1: # A single point doesn't make a circle, return initial state
-        return np.array([initial_state[:3]])
+    if num_points == 1: # A single point, return the center or initial state
+        return np.array([center_coords])
 
 
     trajectory_points = np.zeros((num_points, 3))
@@ -311,17 +329,17 @@ def generate_circle_trajectory(radius=0.5, num_points=100, plane='xy'):
     plane_lower = plane.lower()
 
     if plane_lower == 'xy':
-        center_x, center_y, const_z = initial_state[0], initial_state[1], initial_state[2]
+        center_x, center_y, const_z = center_coords[0], center_coords[1], center_coords[2]
         trajectory_points[:, 0] = center_x + radius * np.cos(angles)
         trajectory_points[:, 1] = center_y + radius * np.sin(angles)
         trajectory_points[:, 2] = const_z
     elif plane_lower == 'yz':
-        const_x, center_y, center_z = initial_state[0], initial_state[1], initial_state[2]
+        const_x, center_y, center_z = center_coords[0], center_coords[1], center_coords[2]
         trajectory_points[:, 0] = const_x
         trajectory_points[:, 1] = center_y + radius * np.cos(angles)
         trajectory_points[:, 2] = center_z + radius * np.sin(angles)
     elif plane_lower == 'xz':
-        center_x, const_y, center_z = initial_state[0], initial_state[1], initial_state[2]
+        center_x, const_y, center_z = center_coords[0], center_coords[1], center_coords[2]
         trajectory_points[:, 0] = center_x + radius * np.cos(angles)
         trajectory_points[:, 1] = const_y
         trajectory_points[:, 2] = center_z + radius * np.sin(angles)

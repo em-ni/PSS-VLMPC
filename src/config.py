@@ -155,6 +155,7 @@ OPTIMIZER_METHOD = 'COBYQA' # 'trust-constr' # 'SLSQP', 'L-BFGS-B', 'TNC' are al
 PERTURBATION_SCALE = 0.1 # for COBYQA
 
 TRAJ_DIR = os.path.join(data_dir, "mpc", "planned_trajectory.csv")
+SMOOTH_CONTORL = False
 # ---------------------------------
 
 """

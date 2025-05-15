@@ -68,9 +68,9 @@ def run_simulation():
         # delta_ref_trajectory = generate_snapped_trajectory(
         #     point_cloud, num_traj_waypoints, T_SIM * (total_ref_steps / N_sim_steps), total_ref_steps, from_initial_pos=True
         # )
-        # delta_ref_trajectory = generate_straight_trajectory(num_points=total_ref_steps, distance=0.5)
-        # delta_ref_trajectory = generate_circle_trajectory(num_points=total_ref_steps, radius=0.65, plane='yz')
-        delta_ref_trajectory = generate_spiral_trajectory(num_points=total_ref_steps, plane='yz', height_change=0.5)
+        delta_ref_trajectory = generate_straight_trajectory(num_points=total_ref_steps, distance=0.5, start_point=np.array([2.639657, 0.01799085, -0.0778001]), axis='z')
+        # delta_ref_trajectory = generate_circle_trajectory(num_points=total_ref_steps, radius=0.65, plane='yz', center=np.array([2.9, 0, 0]))
+        # delta_ref_trajectory = generate_spiral_trajectory(num_points=total_ref_steps, plane='yz', height_change=0.2)
     else:
         # Use a single goal for all steps
         single_goal = pick_goal(point_cloud)
@@ -178,24 +178,27 @@ def run_simulation():
     final_error = np.linalg.norm(x_current_delta - final_target)
     print(f"Final State Delta: {x_current_delta}"); print(f"Final Target Delta: {final_target}"); print(f"Final Error Norm (Delta): {final_error:.4f}")
 
-    # Compute smoothed control and resulting trajectory
-    smoothed_control = smooth_control(control_history)
+    if config.SMOOTH_CONTORL:
+        # Compute smoothed control and resulting trajectory
+        smoothed_control = smooth_control(control_history)
 
-    # Re-simulate with smoothed control to get the resulting trajectory
-    smoothed_state_history = [state_history[0]] 
-    for i in range(len(smoothed_control)):
-        # Convert smoothed control back to volume
-        smoothed_v = V_REST + smoothed_control[i]
-        # Predict next state using the smoothed volume
-        next_state_delta = predict_delta_from_volume(
-            smoothed_v, nn_model, scaler_volumes, scaler_deltas, nn_device)
-        smoothed_state_history.append(next_state_delta)
+        # Re-simulate with smoothed control to get the resulting trajectory
+        smoothed_state_history = [state_history[0]] 
+        for i in range(len(smoothed_control)):
+            # Convert smoothed control back to volume
+            smoothed_v = V_REST + smoothed_control[i]
+            # Predict next state using the smoothed volume
+            next_state_delta = predict_delta_from_volume(
+                smoothed_v, nn_model, scaler_volumes, scaler_deltas, nn_device)
+            smoothed_state_history.append(next_state_delta)
 
-    smoothed_state_history = np.array(smoothed_state_history)
+        smoothed_state_history = np.array(smoothed_state_history)
+    else:
+        smoothed_control = np.array(control_history)
+        smoothed_state_history = np.array(state_history)
 
     # Save trajectory and control data to CSV
     save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, config.TRAJ_DIR)
-    
 
     # Pass the smoothed data to the plotting function
     plot_results(state_history, control_history, delta_ref_trajectory, point_cloud, 
