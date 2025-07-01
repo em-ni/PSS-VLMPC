@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 import torch
 import torch.nn as nn
@@ -198,3 +199,28 @@ def solve_mpc_optimization(
     optimal_v_sequence = optimal_v_sequence_flat.reshape(horizon_N, volume_dim)
 
     return optimal_v_sequence
+
+
+def load_trajectory_data(file_path="planned_trajectory.csv"):
+    """
+    Load the trajectory and control data from CSV file.
+    
+    Returns:
+        tuple: (reference_trajectory, control_inputs)
+    """
+    try:
+        df = pd.read_csv(file_path)
+        print(f"Loaded trajectory data with {len(df)} steps")
+        
+        # Extract reference trajectory
+        ref_cols = [col for col in df.columns if col.startswith('ref_delta_')]
+        ref_trajectory = df[ref_cols].values
+        
+        # Extract control inputs
+        control_cols = [col for col in df.columns if col.startswith('control_')]
+        control_inputs = df[control_cols].values
+        
+        return ref_trajectory, control_inputs
+    except Exception as e:
+        print(f"Error loading trajectory data: {e}")
+        return None, None

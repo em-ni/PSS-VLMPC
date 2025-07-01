@@ -7,35 +7,40 @@ import threading
 import signal
 import time
 import os
+
+from utils.mpc_functions import load_trajectory_data
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.pressure_loader import PressureLoader
 import src.config as config
 from src.robot_env import RobotEnv
 from utils.circle_arc import calculate_circle_through_points
 
-def load_trajectory_data(file_path="planned_trajectory.csv"):
+def apply_transformation(points_3d, matrix_4x4):
     """
-    Load the trajectory and control data from CSV file.
-    
+    Applies a 4x4 transformation matrix to a list of 3D points.
+    Args:
+        points_3d (np.ndarray): Nx3 array of 3D points.
+        matrix_4x4 (np.ndarray): 4x4 transformation matrix.
     Returns:
-        tuple: (reference_trajectory, control_inputs)
+        np.ndarray: Nx3 array of transformed 3D points.
     """
-    try:
-        df = pd.read_csv(file_path)
-        print(f"Loaded trajectory data with {len(df)} steps")
-        
-        # Extract reference trajectory
-        ref_cols = [col for col in df.columns if col.startswith('ref_delta_')]
-        ref_trajectory = df[ref_cols].values
-        
-        # Extract control inputs
-        control_cols = [col for col in df.columns if col.startswith('control_')]
-        control_inputs = df[control_cols].values
-        
-        return ref_trajectory, control_inputs
-    except Exception as e:
-        print(f"Error loading trajectory data: {e}")
-        return None, None
+    if points_3d.ndim == 1: # Single point
+        points_3d = points_3d.reshape(1, -1)
+    if points_3d.shape[1] != 3:
+        raise ValueError("Input points must be Nx3.")
+    if matrix_4x4.shape != (4, 4):
+        raise ValueError("Transformation matrix must be 4x4.")
+
+    num_points = points_3d.shape[0]
+    points_homogeneous = np.hstack((points_3d, np.ones((num_points, 1)))) # Nx4
+    
+    transformed_points_homogeneous = (matrix_4x4 @ points_homogeneous.T).T # (4x4 @ 4xN).T = Nx4
+    
+    transformed_points_3d = transformed_points_homogeneous[:, :3]
+    if transformed_points_3d.shape[0] == 1: # Single point back to 1D
+        return transformed_points_3d.ravel()
+    return transformed_points_3d
+
 
 def main():
     # Check if trajectory file exists
@@ -49,6 +54,17 @@ def main():
     ref_trajectory, control_inputs = load_trajectory_data(trajectory_file)
     if ref_trajectory is None or control_inputs is None:
         return
+    
+    # Load transformation matrix
+    transformation_matrix_file = "transformation_matrix.npy"
+    T_exec_to_plan = np.load(transformation_matrix_file)
+    print(f"Loaded transformation matrix (T_exec_to_plan) from {transformation_matrix_file}:")
+    print(T_exec_to_plan)
+
+    # # Apply transformation to reference trajectory
+    # ref_trajectory = apply_transformation(ref_trajectory, T_exec_to_plan)
+    # print("Transformed reference trajectory")
+
     
     print(f"Loaded reference trajectory with shape {ref_trajectory.shape}")
     print(f"Loaded control inputs with shape {control_inputs.shape}")
@@ -191,6 +207,11 @@ def main():
                 
                 # Track actual position for analysis
                 current_pos = np.array([dif_x[0], dif_y[0], dif_z[0]])
+
+                # Apply transformation to current position
+                current_pos = apply_transformation(current_pos, T_exec_to_plan)
+
+                # Append to position history
                 position_history.append(current_pos)
                 
                 # Calculate error if we're following the trajectory
@@ -211,8 +232,31 @@ def main():
             else:
                 body_dif_x, body_dif_y, body_dif_z = [], [], []
             
+            # Transform the points before plotting
+            origin_base = apply_transformation(np.array([0, 0, 0]), T_exec_to_plan) # origin_base is a (3,) array
+
+            # Transform dif_x, dif_y, dif_z if they contain data
+            if dif_x: # Check if dif_x list is not empty (i.e., data was available for tip)
+                point_to_transform_tip = np.array([dif_x[0], dif_y[0], dif_z[0]]) # Create (3,) array
+                transformed_tip_point = apply_transformation(point_to_transform_tip, T_exec_to_plan) # Returns (3,) array
+                # Update dif_x, dif_y, dif_z to be lists of single transformed coords
+                dif_x = [transformed_tip_point[0]]
+                dif_y = [transformed_tip_point[1]]
+                dif_z = [transformed_tip_point[2]]
+            # else: dif_x, dif_y, dif_z remain empty lists, e.g. [], [], []
+
+            # Transform body_dif_x, body_dif_y, body_dif_z if they contain data
+            if body_dif_x: # Check if body_dif_x list is not empty
+                point_to_transform_body = np.array([body_dif_x[0], body_dif_y[0], body_dif_z[0]]) # Create (3,) array
+                transformed_body_point = apply_transformation(point_to_transform_body, T_exec_to_plan) # Returns (3,) array
+                # Update body_dif_x, body_dif_y, body_dif_z to be lists of single transformed coords
+                body_dif_x = [transformed_body_point[0]]
+                body_dif_y = [transformed_body_point[1]]
+                body_dif_z = [transformed_body_point[2]]
+            # else: body_dif_x, body_dif_y, body_dif_z remain empty lists
+            
             # Update scatter plot positions
-            base_scatter._offsets3d = ([0], [0], [0])
+            base_scatter._offsets3d = ([origin_base[0]], [origin_base[1]], [origin_base[2]])
             tip_scatter._offsets3d = (dif_x, dif_y, dif_z)
             body_scatter._offsets3d = (body_dif_x, body_dif_y, body_dif_z)
             

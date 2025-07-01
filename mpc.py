@@ -68,9 +68,9 @@ def run_simulation():
         # delta_ref_trajectory = generate_snapped_trajectory(
         #     point_cloud, num_traj_waypoints, T_SIM * (total_ref_steps / N_sim_steps), total_ref_steps, from_initial_pos=True
         # )
-        delta_ref_trajectory = generate_straight_trajectory(num_points=total_ref_steps, distance=0.5, start_point=np.array([2.639657, 0.01799085, -0.0778001]), axis='z')
-        # delta_ref_trajectory = generate_circle_trajectory(num_points=total_ref_steps, radius=0.65, plane='yz', center=np.array([2.9, 0, 0]))
-        # delta_ref_trajectory = generate_spiral_trajectory(num_points=total_ref_steps, plane='yz', height_change=0.2)
+        # delta_ref_trajectory = generate_straight_trajectory(num_points=total_ref_steps, distance=0.5, start_point=np.array([2.639657, 0.01799085, -0.0778001]), axis='z')
+        # delta_ref_trajectory = generate_circle_trajectory(num_points=total_ref_steps, radius=0.65, plane='yz', center=np.array([2.639657, 0.01799085, -0.0778001]))
+        delta_ref_trajectory = generate_spiral_trajectory(num_points=total_ref_steps, plane='yz', height_change=0.15,radius_end=0.65, num_revolutions=3)
     else:
         # Use a single goal for all steps
         single_goal = pick_goal(point_cloud)
