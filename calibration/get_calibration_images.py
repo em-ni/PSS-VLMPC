@@ -6,8 +6,8 @@ import time
 # camera_name = 'Misumi_200x200p'
 # camera_name = "Misumi_400x380p"
 # camera_name = "videoscope_1280x720p"
-# camera_name = "camright_640x480p"
-camera_name = "camleft_640x480p"
+camera_name = "camright_640x480p"
+# camera_name = "camleft_640x480p"
 camera_index = 3  # IMPORTANT: check if it's correct every time you run the code
 
 print("IMPORTANT: Check if the camera index is correct every time you run the code.")
