@@ -58,16 +58,17 @@ upper_blue = np.array([140, 255, 255])
 
 # Move settings
 home_first = False
+init_pressure = 0.5
 initial_pos = 115
-steps = 50 # Suggestion: use utils/workspace_preview.py 
-window_steps = 25 # Windows length in steps
-elongationstepSize = window_steps # To regulate overlap between windows (how much a window is shifted)
+window_steps = 20 # Windows length in steps
 max_stroke = 5  # distance in mm from the initial position to final position
+steps = 40 # Suggestion: use utils/workspace_preview.py 
+
+elongationstepSize = window_steps # To regulate overlap between windows (how much a window is shifted)
 stepSize = max_stroke / steps
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
 max_vol_3 = initial_pos + max_stroke
-init_pressure = 2.0
 
 # Map quanser index to axis index
 axis_mapping = {

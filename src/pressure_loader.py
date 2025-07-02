@@ -158,6 +158,7 @@ class PressureLoader:
 
         if self.save_offsets:
             # Save offsets to a file
+            os.makedirs(config.offsets_path, exist_ok=True)
             with open(os.path.join(config.offsets_path, "offsets.txt"), "w") as f:
                 f.write(f"offset_1: {offset_1}\n")
                 f.write(f"offset_2: {offset_2}\n")

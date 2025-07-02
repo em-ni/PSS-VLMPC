@@ -8,7 +8,6 @@ import yaml
 import csv
 import src.config as config
 # import config as config
-
 class Tracker:
     def __init__(self, experiment_name, save_dir, csv_path):
         self.experiment_name = experiment_name
@@ -225,6 +224,12 @@ class Tracker:
                     'tip_x', 'tip_y', 'tip_z', 'base_x', 'base_y', 'base_z']  # Add your existing columns plus the new ones
 
         # Get images from the csv file
+        # If the CSV file does not exist, create it with the correct header
+        if not os.path.exists(self.csv_path):
+            with open(self.csv_path, mode="w", newline="") as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+
         with open(self.csv_path, mode="r") as csvfile:
             reader = csv.DictReader(csvfile)  # Use DictReader to read the CSV
 
@@ -268,6 +273,7 @@ class Tracker:
             # Triangulate the points
             tip_3d, base_3d = self.triangulate(img_left, img_right)
             if tip_3d is None or base_3d is None:
+                print("Bad image paths:", img_left_path, img_right_path)
                 continue
             print("\rTip coordinates: {}   Base coordinates: {}".format(tip_3d.flatten(), base_3d.flatten()), end="", flush=True)
 
@@ -321,6 +327,8 @@ class Tracker:
             if base_right is None and self.base_right_bck is not None:
                 print("Using the backup base position for the right camera.")
                 base_right = self.base_right_bck
+            
+            return None, None
 
         # Convert the points to the format required by triangulatePoints (2xN array)
         tip_left = np.array([[tip_left[0]], [tip_left[1]]], dtype=np.float32)  # (2, 1)
@@ -352,9 +360,9 @@ class Tracker:
 if __name__ == "__main__":
 
     # Experiment name
-    experiment_name = "exp_2025-04-04_19-17-42"
-    save_dir = os.path.join(".", "data", experiment_name)
-    output_file = os.path.join(save_dir, f"output_{experiment_name}.csv")
+    experiment_name = "exp_2025-07-01_15-18-16"
+    save_dir = os.path.abspath(os.path.join(".", "data", experiment_name))
+    output_file = os.path.abspath(os.path.join(save_dir, f"output_{experiment_name}.csv"))
 
     tracker = Tracker(experiment_name, save_dir, output_file)
     tracker.run()
