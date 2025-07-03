@@ -7,7 +7,7 @@ import numpy as np
 # TODO: 
 # -Check if rl still works after nn refactoring for prediction made as absolute_volume - initial_pos - offsets
 
-new_experiment = False
+new_experiment = True
 
 # --- Data collection settings ---
 # Cameras
