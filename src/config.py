@@ -4,18 +4,29 @@ import os
 import time
 import numpy as np
 
-# TODO: 
+# TODO:
 # -Check if rl still works after nn refactoring for prediction made as absolute_volume - initial_pos - offsets
 
-new_experiment = True
+new_experiment = False
 
 # --- Data collection settings ---
 # Cameras
-if new_experiment: print("\n\nIMPORTANT: Check if the camera indexes are correct every time you run the code.\n\n")
+if new_experiment:
+    print(
+        "\n\nIMPORTANT: Check if the camera indexes are correct every time you run the code.\n\n"
+    )
 cam_left_index = 0
 cam_right_index = 3
-P_left_yaml = os.path.abspath(os.path.join("calibration", "calibration_images_camleft_640x480p", "projection_matrix.yaml"))
-P_right_yaml = os.path.abspath(os.path.join("calibration", "calibration_images_camright_640x480p", "projection_matrix.yaml"))
+P_left_yaml = os.path.abspath(
+    os.path.join(
+        "calibration", "calibration_images_camleft_640x480p", "projection_matrix.yaml"
+    )
+)
+P_right_yaml = os.path.abspath(
+    os.path.join(
+        "calibration", "calibration_images_camright_640x480p", "projection_matrix.yaml"
+    )
+)
 
 # Set experiment name and save directory
 today = time.strftime("%Y-%m-%d")
@@ -24,7 +35,9 @@ experiment_name = "exp_" + today + "_" + time_now
 save_dir = os.path.abspath(os.path.join(".", "data", experiment_name))
 csv_path = os.path.abspath(os.path.join(save_dir, f"output_{experiment_name}.csv"))
 data_dir = os.path.abspath(os.path.join(".", "data"))
-offsets_path = os.path.abspath(os.path.join(data_dir, "nn_train_offsets")) # Offsets are saved only after data collection for training
+offsets_path = os.path.abspath(
+    os.path.join(data_dir, "nn_train_offsets")
+)  # Offsets are saved only after data collection for training
 
 if new_experiment:
     # If they dont exist, create the directories and the csv file
@@ -32,7 +45,23 @@ if new_experiment:
         os.makedirs(save_dir)
 
     # Set the csv file columns
-    csv_columns = ["timestamp", "volume_1", "volume_2", "volume_3", "pressure_1", "pressure_2", "pressure_3", "img_left", "img_right", "tip_x", "tip_y", "tip_z", "base_x", "base_y", "base_z"]
+    csv_columns = [
+        "timestamp",
+        "volume_1",
+        "volume_2",
+        "volume_3",
+        "pressure_1",
+        "pressure_2",
+        "pressure_3",
+        "img_left",
+        "img_right",
+        "tip_x",
+        "tip_y",
+        "tip_z",
+        "base_x",
+        "base_y",
+        "base_z",
+    ]
     with open(csv_path, mode="w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(csv_columns)
@@ -60,29 +89,29 @@ upper_blue = np.array([140, 255, 255])
 home_first = False
 init_pressure = 0.5
 initial_pos = 115
-window_steps = 20 # Windows length in steps
+window_steps = 20  # Windows length in steps
 max_stroke = 5  # distance in mm from the initial position to final position
-steps = 40 # Suggestion: use utils/workspace_preview.py 
+steps = 40  # Suggestion: use utils/workspace_preview.py
 
-elongationstepSize = window_steps # To regulate overlap between windows (how much a window is shifted)
+elongationstepSize = (
+    window_steps  # To regulate overlap between windows (how much a window is shifted)
+)
 stepSize = max_stroke / steps
 max_vol_1 = initial_pos + max_stroke
 max_vol_2 = initial_pos + max_stroke
 max_vol_3 = initial_pos + max_stroke
 
 # Map quanser index to axis index
-axis_mapping = {
-    0: 2,  
-    1: 1,  
-    2: 3   
-}
+axis_mapping = {0: 2, 1: 1, 2: 3}
 
 # Configuration (UDP receiver) (data: pressure sensors -> quanser -> simulink -> python)
 UDP_IP = "127.0.0.1"
 UDP_PORT = 25000
 
 # Path to volume inputs (to be used in explorer.move_from_csv)
-input_volume_path = os.path.abspath(os.path.join("data", "volume_inputs", "inputs_2.csv"))
+input_volume_path = os.path.abspath(
+    os.path.join("data", "volume_inputs", "inputs_2.csv")
+)
 # ---------------------------------
 
 # --- Kinematic Neural Network Model settings ---
@@ -98,26 +127,33 @@ POINT_CLOUD_PATH = "data/exp_2025-04-28_15-58-15/dataset.csv"
 
 # LSTM
 sequence_length = 1  # T=3 -> sequence length 4 (t, t-1, t-2, t-3)
-n_features_tau = 3   # volume_1, volume_2, volume_3
-n_features_x = 3     # delta_x, delta_y, delta_z = tip_x, tip_y, tip_z - base_x, base_y, base_z
+n_features_tau = 3  # volume_1, volume_2, volume_3
+n_features_x = (
+    3  # delta_x, delta_y, delta_z = tip_x, tip_y, tip_z - base_x, base_y, base_z
+)
 total_features = n_features_tau + n_features_x
 output_dim = n_features_x
 lstm_hidden_units = 64
-lstm_num_layers = 2    
+lstm_num_layers = 2
 # ---------------------------------
 
 # --- RL settings ---
-N_POINTS = 3      # Number of waypoints in the trajectory
-N_ENVS = 24       # Number of environments to run in parallel
+N_POINTS = 3  # Number of waypoints in the trajectory
+N_ENVS = 24  # Number of environments to run in parallel
 ALGORITHM = "TRPO"
 
-CHECKPOINT_STEPS = 1000000        # Number of steps to save checkpoint
+CHECKPOINT_STEPS = 1000000  # Number of steps to save checkpoint
 TOTAL_TRAINING_STEPS = 1000000  # Total training steps
-TOTAL_N_STEPS = 2048              # Total steps before updating the policy
+TOTAL_N_STEPS = 2048  # Total steps before updating the policy
 
 CHECKPOINTS_DIR = os.path.join(data_dir, "rl", "checkpoints")
 POLICY_DIR = os.path.join(data_dir, "rl", "policy", "trained_policy.zip")
-METRICS_DIR = os.path.join(data_dir, "rl", "training_metrics", f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+METRICS_DIR = os.path.join(
+    data_dir,
+    "rl",
+    "training_metrics",
+    f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+)
 
 EVAL_EPISODES = 10
 # -------------------------------
@@ -151,9 +187,9 @@ R_DELTA_V_WEIGHT = 0
 R_delta_matrix = np.diag([R_DELTA_V_WEIGHT] * VOLUME_DIM)
 N_HORIZON = 1
 
-OPTIMIZER_METHOD = 'COBYQA' # 'trust-constr' # 'SLSQP', 'L-BFGS-B', 'TNC' are also options but not good
+OPTIMIZER_METHOD = "COBYQA"  # 'trust-constr' # 'SLSQP', 'L-BFGS-B', 'TNC' are also options but not good
 # PERTURBATION_SCALE = 0.0065 # for trust-constr
-PERTURBATION_SCALE = 0.1 # for COBYQA
+PERTURBATION_SCALE = 0.1  # for COBYQA
 
 TRAJ_DIR = os.path.join(data_dir, "mpc", "planned_trajectory.csv")
 SMOOTH_CONTORL = False
@@ -277,4 +313,3 @@ These methods define a "trust region" around the current point where a model of 
 
 The choice of solver depends heavily on the characteristics of your objective function, the availability of derivatives, the nature of constraints, and the size of the problem.
 """
-
