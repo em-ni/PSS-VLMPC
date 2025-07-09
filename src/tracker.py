@@ -1,5 +1,6 @@
 import os
 import socket
+import struct
 import threading
 import time
 import cv2
@@ -9,7 +10,7 @@ import csv
 import src.config as config
 # import config as config
 class Tracker:
-    def __init__(self, experiment_name, save_dir, csv_path):
+    def __init__(self, experiment_name, save_dir, csv_path, real_time_tracking=False):
         self.experiment_name = experiment_name
         self.save_dir = save_dir
         self.csv_path = csv_path
@@ -41,6 +42,29 @@ class Tracker:
         self.cur_body_3d = None
         self.alpha = 0.2  # Smoothing factor (0.0-1.0) - lower means more smoothing
         self.filtered_body_3d = None  # Initialize filtered coordinates
+
+        # If realtime tracking track also velocity and acceleration
+        if real_time_tracking:
+            # input variables
+            self.cur_vol_1 = None
+            self.cur_vol_2 = None
+            self.cur_vol_3 = None
+            self.cur_pressure_1 = None
+            self.cur_pressure_2 = None
+            self.cur_pressure_3 = None
+
+            # Tracking variables
+            self.prev_tip_3d = None
+            self.prev_base_3d = None
+            self.cur_tip_vel_3d = None
+            self.prev_tip_vel_3d  = None
+            self.cur_tip_acc_3d = None
+
+            # Sampling frequency
+            self.sampling_freq = 30  # Hz
+            self.dt = 1 / self.sampling_freq  # Time step in seconds
+
+
         
     # These three could be a single function...
     def detect_tip(self, frame):
@@ -158,13 +182,57 @@ class Tracker:
         frame = cv2.imread(img_path)
         return frame
 
+    def get_pressure(self):
+        """
+        Get the current pressure values.
+        """
+        return self.cur_pressure_1, self.cur_pressure_2, self.cur_pressure_3
+    
+    def get_volume(self):
+        """
+        Get the current volume values.
+        """
+        return self.cur_vol_1, self.cur_vol_2, self.cur_vol_3
+
+    def listen_pressure_udp(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((config.UDP_IP, config.UDP_PORT))
+
+        print(f"Listening on {config.UDP_IP}:{config.UDP_PORT}")
+        try:
+            while True:
+                data, addr = sock.recvfrom(1024)  # Adjust buffer size if necessary
+                try:
+                    # Attempt to decode as a double precision float 
+                    values_double = struct.unpack('ddd', data)
+                    # print(f"Received double: {values_double[0]} from {addr}")
+                    # print(f"Received double: {values_double[1]} from {addr}")
+                    # print(f"Received double: {values_double[2]} from {addr}")
+                    self.cur_pressure_1 = values_double[0]
+                    self.cur_pressure_2 = values_double[1]
+                    self.cur_pressure_3 = values_double[2]
+
+                except:
+                    print(f"Received unhandled data type: {data} from {addr}")
+                    pass
+
+        except KeyboardInterrupt:
+            print("Stopping receiver.")
+            sock.close()
+
+    # TODO
+    def listen_volume_udp(self):
+        """
+        Same as listen_pressure_udp but for volume data, different port and thread
+        """
+
     def load_projection_matrix(self, yaml_path):
         with open(yaml_path, "r") as f:
             data = yaml.safe_load(f)
         P = np.array(data["projection_matrix"], dtype=np.float64)
         return P
     
-    def real_time_tracking(self):
+    def run_real_time_tracking(self):
         """
         Function to track the robot in real-time
         """
@@ -175,44 +243,96 @@ class Tracker:
         if not cap_left.isOpened() or not cap_right.isOpened():
             print("Error: Couldn't open the cameras.")
             return
+        
+        # Listen to the UDP connection in a separate thread for pressure data
+        udp_thread_pressure = threading.Thread(target=self.listen_pressure_udp)
+        udp_thread_pressure.start()
 
-        while True:
-            # Start the timer
-            start = time.time()
+        # Listen to the UDP connection in a separate thread for volume data
+        # udp_thread_volume = threading.Thread(target=self.listen_volume_udp)
+        # udp_thread_volume.start()
 
-            # Read the frames from the cameras
-            ret_left, frame_left = cap_left.read()
-            ret_right, frame_right = cap_right.read()
+        
+        # Write header to the csv file
+        # header: k, volume_1, volume_2, volume_3, pressure_1, pressure_2, pressure_3, base_x, base_y, base_z, tip_x, tip_y, tip_z, tip_velocity_x, tip_velocity_y, tip_velocity_z, tip_acceleration_x, tip_acceleration_y, tip_acceleration_z
+        with open(self.csv_path, mode="w", newline="") as csvfile:
+            fieldnames = ['k', 'volume_1', 'volume_2', 'volume_3', 'pressure_1', 'pressure_2', 'pressure_3',
+                          'base_x', 'base_y', 'base_z', 'tip_x', 'tip_y', 'tip_z',
+                          'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z',
+                          'tip_acceleration_x', 'tip_acceleration_y', 'tip_acceleration_z']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
 
-            if not ret_left or not ret_right:
-                print("Error: Couldn't read the frames.")
-                break
+            k = 0
+            while True:
+                # Sleep for matching the sampling frequency
+                time.sleep(self.dt)
 
-            # Triangulate the points
-            tip_3d, base_3d = self.triangulate(frame_left, frame_right)
-            if tip_3d is None or base_3d is None:
-                continue
-            end = time.time()
-            tracking_time = end - start
-            
-            # print("\rTracking time: {}".format(tracking_time), end="", flush=True)
+                # Start the timer
+                start = time.time()
 
-            # Set the current tip and base positions
-            self.cur_tip_3d = tip_3d
-            self.cur_base_3d = base_3d
+                # Read the frames from the cameras
+                ret_left, frame_left = cap_left.read()
+                ret_right, frame_right = cap_right.read()
 
-            # # Display the frames
-            # cv2.imshow("Left Camera", frame_left)
-            # cv2.imshow("Right Camera", frame_right)
+                # Read pressure and volume as close as possible to the frame reading
+                pressure_1, pressure_2, pressure_3 = self.get_pressure()
+                p = [pressure_1, pressure_2, pressure_3]
+                vol_1, vol_2, vol_3 = self.get_volume()
+                v = [vol_1, vol_2, vol_3]
 
-            # Break the loop if 'q' is pressed
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                if not ret_left or not ret_right:
+                    print("Error: Couldn't read the frames.")
+                    break
 
-        # Release the cameras
-        cap_left.release()
-        cap_right.release()
-        cv2.destroyAllWindows()
+                # Triangulate the points
+                tip_3d, base_3d = self.triangulate(frame_left, frame_right)
+                if tip_3d is None or base_3d is None:
+                    print("\nBad triangulation. Skipping this iteration.")
+                    continue
+
+                # Set the current tip and base positions
+                self.cur_tip_3d = tip_3d - base_3d # NOTE: tip position is relative to the base position
+                self.cur_base_3d = base_3d
+
+                # If there are at least two previous positions calculate velocity
+                if self.prev_tip_3d is not None and self.prev_base_3d is not None:
+                    # Calculate the velocity of the tip and base
+                    self.cur_tip_vel_3d = (self.cur_tip_3d - self.prev_tip_3d) / self.dt
+                    self.cur_base_vel_3d = (self.cur_base_3d - self.prev_base_3d) / self.dt
+
+                    # Calculate the acceleration of the tip
+                    if self.prev_tip_vel_3d is not None:
+                        self.cur_tip_acc_3d = (self.cur_tip_vel_3d - self.prev_tip_vel_3d) / self.dt
+
+                # Write the real-time tracking data to the csv file
+                self.save_real_time_tracking_data(writer, k, p, v)
+
+                # Measure tracking time
+                end = time.time()
+                tracking_time = end - start
+                print("\rLast tracking time: {} Hz".format(tracking_time), end="", flush=True)
+
+                # Update the previous positions and velocities
+                self.prev_tip_3d = self.cur_tip_3d.copy()
+                self.prev_base_3d = self.cur_base_3d.copy()
+                self.prev_tip_vel_3d = self.cur_tip_vel_3d.copy() 
+
+                # Update counter
+                k += 1
+
+                # # Display the frames
+                # cv2.imshow("Left Camera", frame_left)
+                # cv2.imshow("Right Camera", frame_right)
+
+                # Break the loop if 'q' is pressed
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+
+            # Release the cameras
+            cap_left.release()
+            cap_right.release()
+            cv2.destroyAllWindows()
 
     def run(self):
         """
@@ -290,6 +410,39 @@ class Tracker:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()  # Write the header
             writer.writerows(all_rows)  # Write the updated rows
+
+    def save_real_time_tracking_data(self, writer, k, p, v):
+        """
+        Save the real-time tracking data to a CSV file every time a new point is detected.
+        header: k, volume_1, volume_2, volume_3, pressure_1, pressure_2, pressure_3, base_x, base_y, base_z, tip_x, tip_y, tip_z, tip_velocity_x, tip_velocity_y, tip_velocity_z, tip_acceleration_x, tip_acceleration_y, tip_acceleration_z
+        """
+        if writer is None:
+            print("Error: Writer is None. Cannot save real-time tracking data.")
+            return
+        
+        # Write a new row with the current data
+        writer.writerow({
+            'k': k,
+            'volume_1': v[0],
+            'volume_2': v[1],
+            'volume_3': v[2],
+            'pressure_1': p[0],
+            'pressure_2': p[1],
+            'pressure_3': p[2],
+            'base_x': self.cur_base_3d[0],
+            'base_y': self.cur_base_3d[1],
+            'base_z': self.cur_base_3d[2],
+            'tip_x': self.cur_tip_3d[0],
+            'tip_y': self.cur_tip_3d[1],
+            'tip_z': self.cur_tip_3d[2],
+            # Add velocity and acceleration if available
+            'tip_velocity_x': self.cur_tip_vel_3d[0] if self.cur_tip_vel_3d is not None else None,
+            'tip_velocity_y': self.cur_tip_vel_3d[1] if self.cur_tip_vel_3d is not None else None,
+            'tip_velocity_z': self.cur_tip_vel_3d[2] if self.cur_tip_vel_3d is not None else None,
+            'tip_acceleration_x': self.cur_tip_acc_3d[0] if self.cur_tip_acc_3d is not None else None,
+            'tip_acceleration_y': self.cur_tip_acc_3d[1] if self.cur_tip_acc_3d is not None else None,
+            'tip_acceleration_z': self.cur_tip_acc_3d[2] if self.cur_tip_acc_3d is not None else None
+        })
 
     def triangulate(self, img_left, img_right):
         """

@@ -12,7 +12,7 @@ import src.config as config
 # import config as config
 
 class Explorer:
-    def __init__(self, save_dir, csv_path, offsets):
+    def __init__(self, save_dir, csv_path, offsets, real_time=False):
         self.cam_left_index = config.cam_left_index
         self.cam_right_index = config.cam_right_index
         self.save_dir = save_dir
@@ -23,7 +23,24 @@ class Explorer:
         self.initial_pos_2 = config.initial_pos + self.offsets[1]
         self.initial_pos_3 = config.initial_pos + self.offsets[2]
         print(f"Initial positions: {self.initial_pos_1}, {self.initial_pos_2}, {self.initial_pos_3}")
+
+        if real_time:
+            self.generate_trajectories()
+
         return 
+
+    # TODO
+    def generate_trajectories(self):
+        """
+        Generate random trajectories for the motors
+        This is not implemented yet.
+        """
+        for i in range(config.n_trajectories):
+            # Generate a random trajectory
+
+            # Save the trajectory
+            pass
+        return
 
     def get_image(self, cam_index, timestamp):
         """
@@ -241,6 +258,25 @@ class Explorer:
 
         # Probably I should join the thread here
 
+    # TODO
+    def run_real_time(self):
+        """
+        Run the explorer in real-time mode.
+        Run random trajectories and send the volume data in real-time to the tracker.
+        This is not implemented yet.
+        """
+        print("Real-time mode is not implemented yet.")
+
+        # Start sending the volume data in real-time
+        # udp_thread = threading.Thread(target=self.send_volume)
+        # udp_thread.start()
+
+        # for i in range(config.n_trajectories):
+        #     # Execute the trajectory
+        #     pass
+            
+        return
+
     def save_data(self, volume_values, pressure_values, frame_1_name, frame_2_name, timestamp):
         """
         Save data in a csv with columns:
@@ -253,6 +289,15 @@ class Explorer:
 
     def set_pressure_values(self, pressure_values):
         self.pressure_values = pressure_values
+
+    # TODO
+    def send_volume_udp(self, volume_values):
+        """
+        Send the volume values to the tracker via UDP
+        """
+        # sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # sock.sendto(struct.pack('ddd', *volume_values), (config.UDP_IP, config.UDP_PORT))
+        # sock.close()
 
     def step_and_save(self, position_i, position_j, position_k):
         """

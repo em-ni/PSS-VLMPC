@@ -3,9 +3,10 @@ from src.tracker import Tracker
 from src.explorer import Explorer
 from src.points_cloud import PointsCloud
 import src.config as config
+import argparse
 
-if __name__ == "__main__":
 
+def main(realtime: bool):
     # Import the configuration
     experiment_name = config.experiment_name
     save_dir = config.save_dir
@@ -17,19 +18,36 @@ if __name__ == "__main__":
     offsets = pressure_loader.load_pressure()
 
     # Initialize the classes
-    explorer = Explorer(save_dir, csv_path, offsets)
-    tracker = Tracker(experiment_name, save_dir, csv_path)
-    points_cloud = PointsCloud(csv_path)
+    explorer = Explorer(save_dir, csv_path, offsets, realtime)
+    tracker = Tracker(experiment_name, save_dir, csv_path, realtime)
 
-    try:
-        # Move the robot and save volumes, pressures and images
-        explorer.run()
+    if realtime:
+        try:
+            explorer.run_realtime()
+            tracker.run_realtime()
+            print("Realtime execution completed successfully.")
+        except Exception as e:
+            print("An error occurred during realtime execution.")
+            print(e)
+    else:
+        points_cloud = PointsCloud(csv_path)
 
-        # Triangulate the points to get 3d coordinates and plot the points cloud
-        tracker.run()
-        points_cloud.get_points_from_csv()
-        points_cloud.plot_points()
-    except Exception as e:
-        print("An error occurred.")
-        print(e)
+        try:
+            # Move the robot and save volumes, pressures and images
+            explorer.run()
+
+            # Triangulate the points to get 3d coordinates and plot the points cloud
+            tracker.run()
+            points_cloud.get_points_from_csv()
+            points_cloud.plot_points()
+        except Exception as e:
+            print("An error occurred.")
+            print(e)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Data collection script.")
+    parser.add_argument('--realtime', '-rt', action='store_true', help='Enable realtime mode')
+    args = parser.parse_args()
+    main(args.realtime)
         
