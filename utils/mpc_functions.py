@@ -2,12 +2,16 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 import torch
+torch.set_float32_matmul_precision('medium')
 import torch.nn as nn
 from scipy.optimize import minimize
 from src.config import STATE_DIM
+import time
+from src.config import MPC_DEBUG
 
 # --- Prediction Function ---
 def predict_delta_from_volume(volumes_np: np.ndarray, nn_model: nn.Module, scaler_volumes: MinMaxScaler, scaler_deltas: MinMaxScaler, nn_device: torch.device) -> np.ndarray:
+    if MPC_DEBUG: start_time = time.time()
     if nn_model is None: raise RuntimeError("NN Model is not loaded.")
     volumes_np = volumes_np.astype(np.float32).reshape(1, -1)
     try:
@@ -21,6 +25,9 @@ def predict_delta_from_volume(volumes_np: np.ndarray, nn_model: nn.Module, scale
         elif predictions_scaled.shape[0] != 1: predictions_scaled = predictions_scaled.reshape(1, -1)
         predicted_delta_np = scaler_deltas.inverse_transform(predictions_scaled)
     except Exception as e: print(f"ERROR during delta unscaling: {e}\n  Scaled pred: {predictions_scaled}\n  Scaler min: {scaler_deltas.min_}\n  Scaler scale: {scaler_deltas.scale_}"); return np.full(STATE_DIM, np.nan)
+    if MPC_DEBUG: end_time = time.time()
+    if MPC_DEBUG: elapsed_time = end_time - start_time
+    if MPC_DEBUG: print(f"Prediction took {elapsed_time:.6f} seconds for input: {volumes_np.flatten()}")
     return predicted_delta_np.flatten()
 
 # --- MPC Cost Function ---
@@ -178,6 +185,7 @@ def solve_mpc_optimization(
         pass
 
     # --- Run Optimization ---
+    if MPC_DEBUG: start = time.time()
     result = minimize(
         objective,
         v_guess_flat,
@@ -185,6 +193,8 @@ def solve_mpc_optimization(
         bounds=bounds_sequence,
         options=optim_options
     )
+    if MPC_DEBUG: end = time.time()
+    if MPC_DEBUG: print(f"minimize took {end - start:.6f} seconds using method '{method}' with {len(bounds_sequence)} bounds.")
 
     # --- Process result ---
     optimal_v_sequence_flat = result.x

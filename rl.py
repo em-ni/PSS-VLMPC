@@ -17,6 +17,7 @@ from src.trpo_policy_gpu import TRPOPolicyGPU, move_to_gpu
 from utils.circle_arc import calculate_circle_through_points
 import argparse
 import torch
+torch.set_float32_matmul_precision('medium')
 
 # Check if CUDA is available for RL training
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

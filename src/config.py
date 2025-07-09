@@ -159,10 +159,11 @@ EVAL_EPISODES = 10
 # -------------------------------
 
 # --- MPC settings ---
+MPC_DEBUG = False
 STATE_DIM = 3
 CONTROL_DIM = 3
 VOLUME_DIM = 3
-DT = 0.001
+DT = 0.1
 T_SIM = 3.0
 N_sim_steps = int(T_SIM / DT)
 N_WAYPOINTS = 3

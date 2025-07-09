@@ -2,6 +2,7 @@
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.torch_layers import MlpExtractor
 import torch
+torch.set_float32_matmul_precision('medium')
 
 class TRPOPolicyGPU(ActorCriticPolicy):
     """Custom policy class that handles device correctly for TRPO"""

@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import torch
+torch.set_float32_matmul_precision('medium')
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split

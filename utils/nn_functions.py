@@ -3,6 +3,7 @@
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 import torch
+torch.set_float32_matmul_precision('medium')
 from src import config
 from src.config import STATE_DIM, VOLUME_DIM, initial_pos
 from src.nn_model import VolumeNet
@@ -24,10 +25,11 @@ def load_model_and_scalers(model_path, scalers_path):
         # print(f"  Volume Scaler Min: {scaler_volumes.min_}"); print(f"  Volume Scaler Scale: {scaler_volumes.scale_}")
         # print(f"  Delta Scaler Min: {scaler_deltas.min_}"); print(f"  Delta Scaler Scale: {scaler_deltas.scale_}")
         nn_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # print(f"Using device: {nn_device}")
+        print(f"Using device: {nn_device}")
         model = VolumeNet(input_dim=VOLUME_DIM, output_dim=STATE_DIM)
         model.load_state_dict(torch.load(model_path, map_location=nn_device))
-        model = model.to(nn_device); model.eval()
+        model = model.to(nn_device); 
+        model.eval()
         # print("NN model loaded successfully.")
         return model, scaler_volumes, scaler_deltas, nn_device
     except FileNotFoundError: print(f"FATAL ERROR: Model or Scaler file not found.\n  Model: {model_path}\n  Scalers: {scalers_path}"); return None, None, None, None

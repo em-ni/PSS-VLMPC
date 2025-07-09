@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import os
+import torch
+torch.set_float32_matmul_precision('highest')
 from tests.test_blob_sampling import load_point_cloud_from_csv
 import src.config as config
 from utils.traj_functions import generate_denser_point_cloud, generate_snapped_trajectory, pick_goal, generate_straight_trajectory, generate_circle_trajectory, generate_spiral_trajectory
@@ -45,10 +47,12 @@ SCALERS_PATH = config.SCALERS_PATH
 POINT_CLOUD_PATH = config.POINT_CLOUD_PATH
 N_HORIZON = config.N_HORIZON 
 
-def run_simulation():
+def run_simulation(n_runs=1):
     """Runs the MPC control loop following a generated trajectory."""
     nn_model, scaler_volumes, scaler_deltas, nn_device = load_model_and_scalers(MODEL_PATH, SCALERS_PATH)
     if nn_model is None: return
+    nn_model = torch.compile(nn_model)  # Compile the model for better performance
+
 
     # 1. Load Point Cloud 
     try:
@@ -94,6 +98,7 @@ def run_simulation():
     v_previous_applied = V_REST.copy() 
 
     # --- Simulation Loop ---
+    sim_start = time.time()
     for i in range(N_sim_steps): # Loop from 0 to N_sim_steps-1
         step_start_time = time.time()
 
@@ -169,10 +174,13 @@ def run_simulation():
         # Print progress: Compare state at i+1 with target at i+1
         delta_ref_current = delta_ref_trajectory[i+1] # Target state for the *end* of this step
         current_error_norm = np.linalg.norm(x_current_delta - delta_ref_current)
-        print(f"Step {i+1}/{N_sim_steps} | State Delta: [{x_current_delta[0]:.3f}, {x_current_delta[1]:.3f}, {x_current_delta[2]:.3f}] | Target: [{delta_ref_current[0]:.3f},{delta_ref_current[1]:.3f},{delta_ref_current[2]:.3f}] | ErrNorm: {current_error_norm:.3f} | Cmd u*: [{u_command_clipped[0]:.3f}, {u_command_clipped[1]:.3f}, {u_command_clipped[2]:.3f}] | Time: {comp_time:.4f}s", end="\r", flush=True)
-
+        if config.MPC_DEBUG: print(f"Step {i+1}/{N_sim_steps} | State Delta: [{x_current_delta[0]:.3f}, {x_current_delta[1]:.3f}, {x_current_delta[2]:.3f}] | Target: [{delta_ref_current[0]:.3f},{delta_ref_current[1]:.3f},{delta_ref_current[2]:.3f}] | ErrNorm: {current_error_norm:.3f} | Cmd u*: [{u_command_clipped[0]:.3f}, {u_command_clipped[1]:.3f}, {u_command_clipped[2]:.3f}] | Time: {comp_time:.4f}s")#, end="\r", flush=True
+        # else: print(f"Step {i+1}/{N_sim_steps} | State Delta: [{x_current_delta[0]:.3f}, {x_current_delta[1]:.3f}, {x_current_delta[2]:.3f}] | Target: [{delta_ref_current[0]:.3f},{delta_ref_current[1]:.3f},{delta_ref_current[2]:.3f}] | ErrNorm: {current_error_norm:.3f} | Cmd u*: [{u_command_clipped[0]:.3f}, {u_command_clipped[1]:.3f}, {u_command_clipped[2]:.3f}] | Time: {comp_time:.4f}s", end="\r", flush=True)
+    sim_end = time.time()
+    total_sim_time = sim_end - sim_start
+    print(f"\nSimulation completed in {total_sim_time:.2f} seconds for {T_SIM} total time, with time step DT={DT:.2f}s")
     # --- Final Summary ---
-    print("MPC Simulation finished.")
+    print("\nMPC Simulation finished.")
     if computation_times: print(f"Average/Maximum computation time per optimization step: {np.mean(computation_times):.4f}s / {np.max(computation_times):.4f}s")
     final_target = delta_ref_trajectory[N_sim_steps] # Target is at index N_sim_steps
     final_error = np.linalg.norm(x_current_delta - final_target)
@@ -197,12 +205,15 @@ def run_simulation():
         smoothed_control = np.array(control_history)
         smoothed_state_history = np.array(state_history)
 
-    # Save trajectory and control data to CSV
-    save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, config.TRAJ_DIR)
+    if n_runs == 1:
+        # Save trajectory and control data to CSV
+        save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, config.TRAJ_DIR)
 
-    # Pass the smoothed data to the plotting function
-    plot_results(state_history, control_history, delta_ref_trajectory, point_cloud, 
-                 DT, U_MIN_CMD, U_MAX_CMD, smoothed_control, smoothed_state_history)
+        # Pass the smoothed data to the plotting function
+        plot_results(state_history, control_history, delta_ref_trajectory, point_cloud, 
+                    DT, U_MIN_CMD, U_MAX_CMD, smoothed_control, smoothed_state_history)
+    
+    return total_sim_time, final_error
 
 def save_trajectory_to_csv(delta_ref_trajectory, smoothed_control, output_path="planned_trajectory.csv"):
     """
@@ -398,7 +409,27 @@ def smooth_control(control_history, window_size=10):
 
 
 # --- Script Execution ---
+import argparse
+
 if __name__ == "__main__":
-    if not os.path.exists(MODEL_PATH): print(f"FATAL ERROR: Model file not found at {MODEL_PATH}")
-    elif not os.path.exists(SCALERS_PATH): print(f"FATAL ERROR: Scalers file not found at {SCALERS_PATH}")
-    else: run_simulation()
+    parser = argparse.ArgumentParser(description="Run MPC simulation.")
+    parser.add_argument("-n", type=int, default=1, help="Number of times to run the simulation.")
+    args = parser.parse_args()
+
+    if not os.path.exists(MODEL_PATH):
+        print(f"FATAL ERROR: Model file not found at {MODEL_PATH}")
+    elif not os.path.exists(SCALERS_PATH):
+        print(f"FATAL ERROR: Scalers file not found at {SCALERS_PATH}")
+    elif args.n == 1:
+        run_simulation()
+    else:
+        results = []
+        for i in range(args.n):
+            print(f"\n--- Run {i+1} of {args.n} ---")
+            total_sim_time, final_error = run_simulation(args.n)
+            results.append((i+1, final_error, total_sim_time))
+        # Print table
+        print("\nSummary Table:")
+        print(f"{'Run':<6}{'Final Error':<20}{'Total Time (s)':<20}")
+        for run_num, error, t in results:
+            print(f"{run_num:<6}{error:<20.6f}{t:<20.4f}")
