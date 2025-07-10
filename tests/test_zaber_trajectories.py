@@ -1,4 +1,7 @@
+import os
+import sys
 import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import src.config as config
 from zaber_motion.ascii import Connection
 from zaber_motion import Units
@@ -17,6 +20,7 @@ def run():
     print(f'Oscilloscope can store {scope_1.get_max_buffer_size()} samples.')
     scope_1.clear()
     scope_1.add_channel(1, 'pos')
+    scope_1.add_channel(1, 'encoder.pos')
     scope_1.set_timebase(10, Units.TIME_MILLISECONDS)
     scope_1.set_delay(0)
     
@@ -45,11 +49,13 @@ def run():
     print('Writing results')
     pos = data[0]
     pos_samples = pos.get_data(Units.LENGTH_MILLIMETRES)
+    encoder = data[1]
+    encoder_samples = encoder.get_data(Units.LENGTH_MILLIMETRES)
     with open('scope.csv', 'wt') as file:
         file.write('Time (ms),Trajectory Position (mm),Measured Position (mm)\n')
         for i in range(len(pos_samples)):
             file.write(f'{pos.get_sample_time(i, Units.TIME_MILLISECONDS)},')
-            file.write(f'{pos_samples[i]}\n')
+            file.write(f'{pos_samples[i]},{encoder_samples[i]}\n')
 
     # Plot the results
     import matplotlib.pyplot as plt

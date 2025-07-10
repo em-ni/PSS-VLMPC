@@ -324,7 +324,8 @@ def main():
                 print("\nTransformation Matrix (from executed to planned):")
                 print(transformation_matrix)
                 
-                output_filename = "transformation_matrix.npy"
+                output_filename = os.path.join(config.data_dir, "robot_calibration", "transformation_matrix.npy")
+                os.makedirs(os.path.dirname(output_filename), exist_ok=True)
                 np.save(output_filename, transformation_matrix)
                 print(f"Transformation matrix saved to {output_filename}")
 
