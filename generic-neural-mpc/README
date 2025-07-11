@@ -1,0 +1,15 @@
+# Real-Time Neural MPC for a Generic System
+
+This project implements the Real-Time Neural MPC (RTN-MPC) strategy for a generic system whose dynamics are modeled entirely by a neural network. It is a generalized version of the concepts presented in the paper "Real-time Neural MPC: Deep Learning Model Predictive Control for Quadrotors and Agile Robotic Platforms".
+
+The core idea is to locally approximate the neural network dynamics at each time step and use these linear approximations within a fast `acados` optimization framework.
+
+## Prerequisites
+Follow the installation guide in the original [repo](https://github.com/TUM-AAS/neural-mpc/tree/main?tab=readme-ov-file)
+
+## How to Run Example
+Train the NN, then run the MPC
+
+```bash
+python  model/train_example.py
+python example.py 
