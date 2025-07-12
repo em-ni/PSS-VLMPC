@@ -44,7 +44,7 @@ if new_experiment:
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    # Set the csv file columns
+    # Set the csv file columns (different for the realtime case)
     csv_columns = [
         "timestamp",
         "volume_1",
@@ -106,7 +106,20 @@ axis_mapping = {0: 2, 1: 1, 2: 3}
 
 # Configuration (UDP receiver) (data: pressure sensors -> quanser -> simulink -> python)
 UDP_IP = "127.0.0.1"
-UDP_PORT = 25000
+UDP_PRESSURE_PORT = 25000
+UDP_E2T_TRACK_SIGNAL_PORT = 25001 # From explorer to tracker 
+UDP_T2E_TRACK_SIGNAL_PORT = 25002 # From tracker to explorer
+UDP_QUIT_TRACK_PORT = 25003 # From explorer to tracker to quit execution
+
+
+# Number of trajectory for realtime data collection
+# Remember max samples per oscilloscope is 1024
+N_TRAJECTORIES = 5
+SCOPE_RECORD_DT = 0.1  # Time between two consecutive samples in milliseconds
+TRACK_RECORD_DT = 0.1  # Time between two consecutive samples in milliseconds
+
+exp_temp_csv = os.path.join(data_dir, "temp", "rt_explorer.csv")
+track_temp_csv = os.path.join(data_dir, "temp", "rt_tracker.csv")
 
 # Path to volume inputs (to be used in explorer.move_from_csv)
 input_volume_path = os.path.abspath(

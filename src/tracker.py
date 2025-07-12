@@ -10,7 +10,8 @@ import csv
 import src.config as config
 # import config as config
 class Tracker:
-    def __init__(self, experiment_name, save_dir, csv_path, real_time_tracking=False):
+    def __init__(self, experiment_name, save_dir, csv_path, realtime=False):
+        print("Initializing Tracker...")
         self.experiment_name = experiment_name
         self.save_dir = save_dir
         self.csv_path = csv_path
@@ -44,11 +45,19 @@ class Tracker:
         self.filtered_body_3d = None  # Initialize filtered coordinates
 
         # If realtime tracking track also velocity and acceleration
-        if real_time_tracking:
+        if realtime:
+            # Track boolean set by explorer
+            self.quit = False # Used to exit the program
+            self.track = False # Used to start/stop tracking
+            self.temp_csv_path = config.track_temp_csv
+
+            # Data buffer for real-time tracking
+            self.data_buffer = []  # Buffer to store data in memory before writing to file
+
+            # Create a temporary csv file for real-time tracking    
+            os.makedirs(os.path.dirname(self.temp_csv_path), exist_ok=True)
+
             # input variables
-            self.cur_vol_1 = None
-            self.cur_vol_2 = None
-            self.cur_vol_3 = None
             self.cur_pressure_1 = None
             self.cur_pressure_2 = None
             self.cur_pressure_3 = None
@@ -61,8 +70,12 @@ class Tracker:
             self.cur_tip_acc_3d = None
 
             # Sampling frequency
-            self.sampling_freq = 30  # Hz
-            self.dt = 1 / self.sampling_freq  # Time step in seconds
+            self.dt = config.TRACK_RECORD_DT
+
+            # Initialize threads
+            self.init_rt_threads()
+
+        print(f"\nTracker initialized")
 
 
         
@@ -188,43 +201,110 @@ class Tracker:
         """
         return self.cur_pressure_1, self.cur_pressure_2, self.cur_pressure_3
     
-    def get_volume(self):
+    def get_track_signal(self):
         """
-        Get the current volume values.
+        Get the current track signal.
         """
-        return self.cur_vol_1, self.cur_vol_2, self.cur_vol_3
+        return self.track
+
+    def init_rt_threads(self):
+        # Listen to the UDP connection in a separate thread for pressure data
+        self.udp_thread_pressure = threading.Thread(target=self.listen_pressure_udp)
+        self.udp_thread_pressure.start()
+        time.sleep(0.1)
+
+        # Listen to the UDP connection in a separate thread for track signal
+        self.udp_thread_track_signal = threading.Thread(target=self.listen_track_signal_udp)
+        self.udp_thread_track_signal.start()
+        time.sleep(0.1)
+
+        # Listen to the UDP connection in a separate thread for quit signal
+        self.udp_thread_quit = threading.Thread(target=self.listen_quit_signal)
+        self.udp_thread_quit.start()
+        time.sleep(0.1)
+
+        # Give some time for the threads to start
+        time.sleep(1)  
+        print("Real-time threads initialized.")
 
     def listen_pressure_udp(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind((config.UDP_IP, config.UDP_PORT))
-
-        print(f"Listening on {config.UDP_IP}:{config.UDP_PORT}")
+        sock.bind((config.UDP_IP, config.UDP_PRESSURE_PORT))
+        sock.settimeout(1.0)
+        print(f"Tracker listening on {config.UDP_IP}:{config.UDP_PRESSURE_PORT}")
         try:
-            while True:
-                data, addr = sock.recvfrom(1024)  # Adjust buffer size if necessary
+            while not self.quit:
                 try:
-                    # Attempt to decode as a double precision float 
-                    values_double = struct.unpack('ddd', data)
-                    # print(f"Received double: {values_double[0]} from {addr}")
-                    # print(f"Received double: {values_double[1]} from {addr}")
-                    # print(f"Received double: {values_double[2]} from {addr}")
-                    self.cur_pressure_1 = values_double[0]
-                    self.cur_pressure_2 = values_double[1]
-                    self.cur_pressure_3 = values_double[2]
-
-                except:
-                    print(f"Received unhandled data type: {data} from {addr}")
-                    pass
-
+                    data, addr = sock.recvfrom(1024)
+                    try:
+                        values_double = struct.unpack('ddd', data)
+                        self.cur_pressure_1 = values_double[0]
+                        self.cur_pressure_2 = values_double[1]
+                        self.cur_pressure_3 = values_double[2]
+                    except:
+                        print(f"Received unhandled data type: {data} from {addr}")
+                        pass
+                except socket.timeout:
+                    continue
         except KeyboardInterrupt:
             print("Stopping receiver.")
+        finally:
             sock.close()
 
-    # TODO
-    def listen_volume_udp(self):
+    def listen_quit_signal(self):
         """
-        Same as listen_pressure_udp but for volume data, different port and thread
+        Listen to the quit signal from the explorer via UDP
         """
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((config.UDP_IP, config.UDP_QUIT_TRACK_PORT))
+        sock.settimeout(1.0)
+        print(f"Tracker listening for quit signal on {config.UDP_IP}:{config.UDP_QUIT_TRACK_PORT}")
+        try:
+            while not self.quit:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    try:
+                        quit_signal = struct.unpack('?', data)[0]
+                        if quit_signal:
+                            self.quit = True
+                            print(f"Received quit signal: {quit_signal} from {addr}")
+                            return
+                    except:
+                        print(f"Received unhandled data type: {data} from {addr}")
+                        pass
+                except socket.timeout:
+                    continue
+        except KeyboardInterrupt:
+            print("Stopping receiver.")
+        finally:
+            sock.close()
+
+    def listen_track_signal_udp(self):
+        """
+        Listen to the track signal from the explorer via UDP
+        """
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((config.UDP_IP, config.UDP_E2T_TRACK_SIGNAL_PORT))
+        sock.settimeout(1.0)
+        print(f"Tracker listening for track signal on {config.UDP_IP}:{config.UDP_E2T_TRACK_SIGNAL_PORT}")
+        try:
+            while not self.quit:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    try:
+                        track_signal = struct.unpack('?', data)[0]
+                        self.track = track_signal
+                        if self.quit:
+                            return
+                    except:
+                        print(f"Received unhandled data type: {data} from {addr}")
+                        pass
+                except socket.timeout:
+                    continue
+        except KeyboardInterrupt:
+            print("Stopping receiver.")
+        finally:
+            sock.close()
 
     def load_projection_matrix(self, yaml_path):
         with open(yaml_path, "r") as f:
@@ -232,9 +312,9 @@ class Tracker:
         P = np.array(data["projection_matrix"], dtype=np.float64)
         return P
     
-    def run_real_time_tracking(self):
+    def run_realtime_tracking(self):
         """
-        Function to track the robot in real-time
+        Function to track the robot in real-time, buffering data in memory and writing to file at the end.
         """
         # Initialize the camera
         cap_left = cv2.VideoCapture(self.cam_left_index, cv2.CAP_DSHOW)
@@ -243,30 +323,12 @@ class Tracker:
         if not cap_left.isOpened() or not cap_right.isOpened():
             print("Error: Couldn't open the cameras.")
             return
-        
-        # Listen to the UDP connection in a separate thread for pressure data
-        udp_thread_pressure = threading.Thread(target=self.listen_pressure_udp)
-        udp_thread_pressure.start()
 
-        # Listen to the UDP connection in a separate thread for volume data
-        # udp_thread_volume = threading.Thread(target=self.listen_volume_udp)
-        # udp_thread_volume.start()
-
-        
-        # Write header to the csv file
-        # header: k, volume_1, volume_2, volume_3, pressure_1, pressure_2, pressure_3, base_x, base_y, base_z, tip_x, tip_y, tip_z, tip_velocity_x, tip_velocity_y, tip_velocity_z, tip_acceleration_x, tip_acceleration_y, tip_acceleration_z
-        with open(self.csv_path, mode="w", newline="") as csvfile:
-            fieldnames = ['k', 'volume_1', 'volume_2', 'volume_3', 'pressure_1', 'pressure_2', 'pressure_3',
-                          'base_x', 'base_y', 'base_z', 'tip_x', 'tip_y', 'tip_z',
-                          'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z',
-                          'tip_acceleration_x', 'tip_acceleration_y', 'tip_acceleration_z']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-
-            k = 0
-            while True:
+        k = 0
+        while self.quit is False:
+            if self.track:
                 # Sleep for matching the sampling frequency
-                time.sleep(self.dt)
+                # time.sleep(self.dt/ 1000)  # Convert ms to seconds
 
                 # Start the timer
                 start = time.time()
@@ -275,11 +337,9 @@ class Tracker:
                 ret_left, frame_left = cap_left.read()
                 ret_right, frame_right = cap_right.read()
 
-                # Read pressure and volume as close as possible to the frame reading
+                # Read pressure as close as possible to the frame reading
                 pressure_1, pressure_2, pressure_3 = self.get_pressure()
                 p = [pressure_1, pressure_2, pressure_3]
-                vol_1, vol_2, vol_3 = self.get_volume()
-                v = [vol_1, vol_2, vol_3]
 
                 if not ret_left or not ret_right:
                     print("Error: Couldn't read the frames.")
@@ -305,18 +365,37 @@ class Tracker:
                     if self.prev_tip_vel_3d is not None:
                         self.cur_tip_acc_3d = (self.cur_tip_vel_3d - self.prev_tip_vel_3d) / self.dt
 
-                # Write the real-time tracking data to the csv file
-                self.save_real_time_tracking_data(writer, k, p, v)
+                # Buffer the real-time tracking data in memory
+                row = {
+                    'k': k,
+                    'pressure_1': p[0],
+                    'pressure_2': p[1],
+                    'pressure_3': p[2],
+                    'base_x': self.cur_base_3d[0],
+                    'base_y': self.cur_base_3d[1],
+                    'base_z': self.cur_base_3d[2],
+                    'tip_x': self.cur_tip_3d[0],
+                    'tip_y': self.cur_tip_3d[1],
+                    'tip_z': self.cur_tip_3d[2],
+                    'tip_velocity_x': self.cur_tip_vel_3d[0] if self.cur_tip_vel_3d is not None else None,
+                    'tip_velocity_y': self.cur_tip_vel_3d[1] if self.cur_tip_vel_3d is not None else None,
+                    'tip_velocity_z': self.cur_tip_vel_3d[2] if self.cur_tip_vel_3d is not None else None,
+                    'tip_acceleration_x': self.cur_tip_acc_3d[0] if self.cur_tip_acc_3d is not None else None,
+                    'tip_acceleration_y': self.cur_tip_acc_3d[1] if self.cur_tip_acc_3d is not None else None,
+                    'tip_acceleration_z': self.cur_tip_acc_3d[2] if self.cur_tip_acc_3d is not None else None
+                }
+                self.data_buffer.append(row)
 
                 # Measure tracking time
                 end = time.time()
                 tracking_time = end - start
-                print("\rLast tracking time: {} Hz".format(tracking_time), end="", flush=True)
+                # print("\rLast tracking time: {} ms".format(tracking_time*1000), end="", flush=True)
 
                 # Update the previous positions and velocities
                 self.prev_tip_3d = self.cur_tip_3d.copy()
                 self.prev_base_3d = self.cur_base_3d.copy()
-                self.prev_tip_vel_3d = self.cur_tip_vel_3d.copy() 
+                if self.cur_tip_vel_3d is not None:
+                    self.prev_tip_vel_3d = self.cur_tip_vel_3d.copy() 
 
                 # Update counter
                 k += 1
@@ -324,15 +403,27 @@ class Tracker:
                 # # Display the frames
                 # cv2.imshow("Left Camera", frame_left)
                 # cv2.imshow("Right Camera", frame_right)
+            else:
+                # If data buffer is not empty write to file
+                if self.data_buffer != []:
+                    self.write_data_buffer_to_csv()
 
-                # Break the loop if 'q' is pressed
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
+        # Wait for the threads to finish
+        self.udp_thread_pressure.join()
+        print("Pressure thread finished.")
+        time.sleep(1)  
+        self.udp_thread_track_signal.join()
+        print("Track signal thread finished.")
+        time.sleep(1)
+        self.udp_thread_quit.join()
+        print("Quit signal thread finished.")
+        time.sleep(1)
 
-            # Release the cameras
-            cap_left.release()
-            cap_right.release()
-            cv2.destroyAllWindows()
+        # Release the cameras
+        cap_left.release()
+        cap_right.release()
+        return
+
 
     def run(self):
         """
@@ -411,38 +502,15 @@ class Tracker:
             writer.writeheader()  # Write the header
             writer.writerows(all_rows)  # Write the updated rows
 
-    def save_real_time_tracking_data(self, writer, k, p, v):
+    def send_save_signal(self, save_signal):
         """
-        Save the real-time tracking data to a CSV file every time a new point is detected.
-        header: k, volume_1, volume_2, volume_3, pressure_1, pressure_2, pressure_3, base_x, base_y, base_z, tip_x, tip_y, tip_z, tip_velocity_x, tip_velocity_y, tip_velocity_z, tip_acceleration_x, tip_acceleration_y, tip_acceleration_z
+        Send the track signal to the explorer via UDP
         """
-        if writer is None:
-            print("Error: Writer is None. Cannot save real-time tracking data.")
-            return
-        
-        # Write a new row with the current data
-        writer.writerow({
-            'k': k,
-            'volume_1': v[0],
-            'volume_2': v[1],
-            'volume_3': v[2],
-            'pressure_1': p[0],
-            'pressure_2': p[1],
-            'pressure_3': p[2],
-            'base_x': self.cur_base_3d[0],
-            'base_y': self.cur_base_3d[1],
-            'base_z': self.cur_base_3d[2],
-            'tip_x': self.cur_tip_3d[0],
-            'tip_y': self.cur_tip_3d[1],
-            'tip_z': self.cur_tip_3d[2],
-            # Add velocity and acceleration if available
-            'tip_velocity_x': self.cur_tip_vel_3d[0] if self.cur_tip_vel_3d is not None else None,
-            'tip_velocity_y': self.cur_tip_vel_3d[1] if self.cur_tip_vel_3d is not None else None,
-            'tip_velocity_z': self.cur_tip_vel_3d[2] if self.cur_tip_vel_3d is not None else None,
-            'tip_acceleration_x': self.cur_tip_acc_3d[0] if self.cur_tip_acc_3d is not None else None,
-            'tip_acceleration_y': self.cur_tip_acc_3d[1] if self.cur_tip_acc_3d is not None else None,
-            'tip_acceleration_z': self.cur_tip_acc_3d[2] if self.cur_tip_acc_3d is not None else None
-        })
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Send the track signal to the explorer
+        data = struct.pack('?', bool(save_signal))
+        sock.sendto(data, (config.UDP_IP, config.UDP_T2E_TRACK_SIGNAL_PORT))
+        sock.close()
 
     def triangulate(self, img_left, img_right):
         """
@@ -509,6 +577,35 @@ class Tracker:
 
 
         return tip_3d, base_3d
+
+    def write_data_buffer_to_csv(self):
+        """
+        Write the buffered data to the CSV file.
+        """
+
+        # Prepare to buffer data in memory
+        fieldnames = [
+            'k', 'pressure_1', 'pressure_2', 'pressure_3',
+            'base_x', 'base_y', 'base_z', 'tip_x', 'tip_y', 'tip_z',
+            'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z',
+            'tip_acceleration_x', 'tip_acceleration_y', 'tip_acceleration_z'
+        ]
+
+        # Ensure the CSV file exists and has the correct header
+        if not os.path.exists(self.temp_csv_path):
+            with open(self.temp_csv_path, mode="w", newline="") as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+
+        with open(self.temp_csv_path, mode="a", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=self.data_buffer[0].keys())
+            for row in self.data_buffer:
+                writer.writerow(row)
+        print(f"Wrote {len(self.data_buffer)} rows to {self.temp_csv_path}")
+        self.data_buffer = []  # Clear the buffer after writing
+
+        # Send the save signal to the explorer
+        self.send_save_signal(True)
 
 if __name__ == "__main__":
 

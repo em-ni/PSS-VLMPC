@@ -54,9 +54,9 @@ class PressureLoader:
 
     def listen_pressure_udp(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind((config.UDP_IP, config.UDP_PORT))
+        self.sock.bind((config.UDP_IP, config.UDP_PRESSURE_PORT))
 
-        print(f"Listening on {config.UDP_IP}:{config.UDP_PORT}")
+        print(f"Listening on {config.UDP_IP}:{config.UDP_PRESSURE_PORT}")
         try:
             while self.listen:
                 data, addr = self.sock.recvfrom(1024)  # Adjust buffer size if necessary

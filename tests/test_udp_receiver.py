@@ -3,12 +3,12 @@ import struct
 
 # Configuration
 UDP_IP = "127.0.0.1"
-UDP_PORT = 25000
+UDP_PRESSURE_PORT = 25000
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind((UDP_IP, UDP_PORT))
+sock.bind((UDP_IP, UDP_PRESSURE_PORT))
 
-print(f"Listening on {UDP_IP}:{UDP_PORT}")
+print(f"Listening on {UDP_IP}:{UDP_PRESSURE_PORT}")
 
 try:
     while True:
