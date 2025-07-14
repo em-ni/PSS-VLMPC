@@ -387,6 +387,7 @@ class Explorer:
 
             # Send the track signal to the tracker
             self.send_track_signal(True)
+            start = time.time()
 
             # Move the motors to the next points
             self.axis_1.move_absolute(self.initial_pos_1 + next_points[0], Units.LENGTH_MILLIMETRES, False)
@@ -397,6 +398,9 @@ class Explorer:
             self.axis_3.wait_until_idle()
 
             # Stop the track signal
+            end_time = time.time()
+            self.dt = (end_time - start)
+            print(f"Time taken for trajectory: {self.dt} s")
             self.send_track_signal(False)
 
             # Write volumes to csv
@@ -504,7 +508,7 @@ class Explorer:
 
         with open(self.temp_csv_path, 'a') as file:
             for i in range(min(len(encoder_samples_1), len(encoder_samples_2), len(encoder_samples_3))):
-                file.write(f'{encoder_1_times[i]},')
+                file.write(f'{round(encoder_1_times[i],4)},')
                 file.write(f'{encoder_samples_1[i]},{encoder_samples_2[i]},{encoder_samples_3[i]}\n')
         print(f"Wrote {i} rows to {self.temp_csv_path}")
 

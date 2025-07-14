@@ -9,6 +9,34 @@ import yaml
 import csv
 import src.config as config
 # import config as config
+
+# Threaded camera stream for fast frame grabbing
+class CameraStream:
+    def __init__(self, cam_index):
+        self.cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+        self.ret = False
+        self.frame = None
+        self.running = True
+        self.lock = threading.Lock()
+        self.thread = threading.Thread(target=self.update, daemon=True)
+        self.thread.start()
+
+    def update(self):
+        while self.running:
+            ret, frame = self.cap.read()
+            with self.lock:
+                self.ret = ret
+                self.frame = frame
+
+    def read(self):
+        with self.lock:
+            return self.ret, self.frame.copy() if self.frame is not None else (False, None)
+
+    def release(self):
+        self.running = False
+        self.thread.join()
+        self.cap.release()
+
 class Tracker:
     def __init__(self, experiment_name, save_dir, csv_path, realtime=False):
         print("Initializing Tracker...")
@@ -77,8 +105,6 @@ class Tracker:
 
         print(f"\nTracker initialized")
 
-
-        
     # These three could be a single function...
     def detect_tip(self, frame):
         """
@@ -312,30 +338,45 @@ class Tracker:
         P = np.array(data["projection_matrix"], dtype=np.float64)
         return P
     
+    # For data collection
     def run_realtime_tracking(self):
         """
         Function to track the robot in real-time, buffering data in memory and writing to file at the end.
         """
-        # Initialize the camera
-        cap_left = cv2.VideoCapture(self.cam_left_index, cv2.CAP_DSHOW)
-        cap_right = cv2.VideoCapture(self.cam_right_index, cv2.CAP_DSHOW)
-
-        if not cap_left.isOpened() or not cap_right.isOpened():
+        debug = False
+        # Use threaded camera streams
+        cam_left = CameraStream(self.cam_left_index)
+        cam_right = CameraStream(self.cam_right_index)
+        time.sleep(0.5)  # Let threads warm up
+        # Check if cameras opened
+        if not cam_left.cap.isOpened() or not cam_right.cap.isOpened():
             print("Error: Couldn't open the cameras.")
+            cam_left.release()
+            cam_right.release()
             return
 
         k = 0
         while self.quit is False:
             if self.track:
-                # Sleep for matching the sampling frequency
-                # time.sleep(self.dt/ 1000)  # Convert ms to seconds
+                
+                # Wait according to the sampling frequency
+                time.sleep(self.dt/1000)
 
                 # Start the timer
-                start = time.time()
+                start_track = time.time()
 
-                # Read the frames from the cameras
-                ret_left, frame_left = cap_left.read()
-                ret_right, frame_right = cap_right.read()
+                # Read the frames from the camera threads
+                start_read = time.time()
+                ret_left, frame_left = cam_left.read()
+                ret_right, frame_right = cam_right.read()
+                end_read = time.time()
+                read_time = end_read - start_read
+                L_w = cam_left.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                L_h = cam_left.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                R_w = cam_right.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                R_h = cam_right.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                if debug: print("\r\nReading frames at resolution L:{}x{} and R:{}x{}".format(L_w, L_h, R_w, R_h), end="", flush=True)
+                if debug: print("\r\nRead time: {} ms".format(round(read_time*1000, 3)))
 
                 # Read pressure as close as possible to the frame reading
                 pressure_1, pressure_2, pressure_3 = self.get_pressure()
@@ -346,12 +387,17 @@ class Tracker:
                     break
 
                 # Triangulate the points
-                tip_3d, base_3d = self.triangulate(frame_left, frame_right)
+                start_triangulate = time.time()
+                tip_3d, base_3d, _ = self.triangulate(frame_left, frame_right, with_body=False)
                 if tip_3d is None or base_3d is None:
                     print("\nBad triangulation. Skipping this iteration.")
                     continue
+                end_triangulate = time.time()
+                triangulation_time = end_triangulate - start_triangulate
+                if debug: print("\rTriangulation time: {} ms".format(round(triangulation_time*1000, 3)))
 
                 # Set the current tip and base positions
+                start_buffer = time.time()
                 self.cur_tip_3d = tip_3d - base_3d # NOTE: tip position is relative to the base position
                 self.cur_base_3d = base_3d
 
@@ -368,15 +414,15 @@ class Tracker:
                 # Buffer the real-time tracking data in memory
                 row = {
                     'k': k,
-                    'pressure_1': p[0],
-                    'pressure_2': p[1],
-                    'pressure_3': p[2],
-                    'base_x': self.cur_base_3d[0],
-                    'base_y': self.cur_base_3d[1],
-                    'base_z': self.cur_base_3d[2],
-                    'tip_x': self.cur_tip_3d[0],
-                    'tip_y': self.cur_tip_3d[1],
-                    'tip_z': self.cur_tip_3d[2],
+                    'pressure_1': p[0] if p[0] is not None else None,
+                    'pressure_2': p[1] if p[1] is not None else None,
+                    'pressure_3': p[2] if p[2] is not None else None,
+                    'base_x': self.cur_base_3d[0] if self.cur_base_3d is not None else None,
+                    'base_y': self.cur_base_3d[1] if self.cur_base_3d is not None else None,
+                    'base_z': self.cur_base_3d[2] if self.cur_base_3d is not None else None,
+                    'tip_x': self.cur_tip_3d[0] if self.cur_tip_3d is not None else None,
+                    'tip_y': self.cur_tip_3d[1] if self.cur_tip_3d is not None else None,
+                    'tip_z': self.cur_tip_3d[2] if self.cur_tip_3d is not None else None,
                     'tip_velocity_x': self.cur_tip_vel_3d[0] if self.cur_tip_vel_3d is not None else None,
                     'tip_velocity_y': self.cur_tip_vel_3d[1] if self.cur_tip_vel_3d is not None else None,
                     'tip_velocity_z': self.cur_tip_vel_3d[2] if self.cur_tip_vel_3d is not None else None,
@@ -385,11 +431,14 @@ class Tracker:
                     'tip_acceleration_z': self.cur_tip_acc_3d[2] if self.cur_tip_acc_3d is not None else None
                 }
                 self.data_buffer.append(row)
+                end_buffer = time.time()
+                buffer_time = end_buffer - start_buffer
+                if debug: print("\rBuffering time: {} ms".format(round(buffer_time*1000, 3)))
 
                 # Measure tracking time
-                end = time.time()
-                tracking_time = end - start
-                # print("\rLast tracking time: {} ms".format(tracking_time*1000), end="", flush=True)
+                end_track = time.time()
+                tracking_time = end_track - start_track
+                if debug: print("\rTracking time: {} ms".format(round(tracking_time*1000, 3)))
 
                 # Update the previous positions and velocities
                 self.prev_tip_3d = self.cur_tip_3d.copy()
@@ -399,10 +448,6 @@ class Tracker:
 
                 # Update counter
                 k += 1
-
-                # # Display the frames
-                # cv2.imshow("Left Camera", frame_left)
-                # cv2.imshow("Right Camera", frame_right)
             else:
                 # If data buffer is not empty write to file
                 if self.data_buffer != []:
@@ -419,11 +464,65 @@ class Tracker:
         print("Quit signal thread finished.")
         time.sleep(1)
 
+        # Release the camera threads
+        cam_left.release()
+        cam_right.release()
+        return
+
+    # For animations
+    def real_time_tracking(self):
+        """
+        Function to track the robot in real-time
+        """
+        # Initialize the camera
+        cap_left = cv2.VideoCapture(self.cam_left_index, cv2.CAP_DSHOW)
+        cap_right = cv2.VideoCapture(self.cam_right_index, cv2.CAP_DSHOW)
+
+        if not cap_left.isOpened() or not cap_right.isOpened():
+            print("Error: Couldn't open the cameras.")
+            return
+
+        while True:
+            # Start the timer
+            start = time.time()
+
+            # Read the frames from the cameras
+            ret_left, frame_left = cap_left.read()
+            ret_right, frame_right = cap_right.read()
+
+            if not ret_left or not ret_right:
+                print("Error: Couldn't read the frames.")
+                break
+
+            # Triangulate the points
+            tip_3d, base_3d, body_3d = self.triangulate(frame_left, frame_right)
+            if tip_3d is None or base_3d is None:
+                continue
+            end = time.time()
+            tracking_time = end - start
+            
+            # print("\rTracking time: {}".format(tracking_time), end="", flush=True)
+
+            # Set the current tip and base positions
+            self.cur_tip_3d = tip_3d
+            self.cur_base_3d = base_3d
+
+            if body_3d is not None:
+                # Apply filtering to body coordinates
+                self.cur_body_3d = self.filter_coordinates(body_3d)
+
+            # # Display the frames
+            # cv2.imshow("Left Camera", frame_left)
+            # cv2.imshow("Right Camera", frame_right)
+
+            # Break the loop if 'q' is pressed
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
         # Release the cameras
         cap_left.release()
         cap_right.release()
-        return
-
+        cv2.destroyAllWindows()
 
     def run(self):
         """
@@ -482,7 +581,7 @@ class Tracker:
                 continue
 
             # Triangulate the points
-            tip_3d, base_3d = self.triangulate(img_left, img_right)
+            tip_3d, base_3d, _ = self.triangulate(img_left, img_right)
             if tip_3d is None or base_3d is None:
                 print("Bad image paths:", img_left_path, img_right_path)
                 continue
@@ -512,7 +611,7 @@ class Tracker:
         sock.sendto(data, (config.UDP_IP, config.UDP_T2E_TRACK_SIGNAL_PORT))
         sock.close()
 
-    def triangulate(self, img_left, img_right):
+    def triangulate(self, img_left, img_right, with_body=False):
         """
         Input: img_left - Image from left camera
                 img_right - Image from right camera
@@ -525,8 +624,6 @@ class Tracker:
         base_left = self.detect_base(img_left)
         tip_right = self.detect_tip(img_right)
         base_right = self.detect_base(img_right)
-        body_left = self.detect_body(img_left)
-        body_right = self.detect_body(img_right)
 
         # Backup the base positions
         if base_left is not None and base_right is not None and self.first_base is False:
@@ -540,7 +637,7 @@ class Tracker:
         if self.base_right_bck is not None:
             base_right = self.base_right_bck
         
-        if tip_left is None or base_left is None or tip_right is None or base_right is None or body_left is None or body_right is None:
+        if tip_left is None or base_left is None or tip_right is None or base_right is None:
             print("Couldn't detect all points in both images.")
             if base_left is None and self.base_left_bck is not None:
                 print("Using the backup base position for the left camera.")
@@ -556,27 +653,29 @@ class Tracker:
         base_left = np.array([[base_left[0]], [base_left[1]]], dtype=np.float32)  # (2, 1)
         tip_right = np.array([[tip_right[0]], [tip_right[1]]], dtype=np.float32)  # (2, 1)
         base_right = np.array([[base_right[0]], [base_right[1]]], dtype=np.float32)  # (2, 1)
-        body_left = np.array([[body_left[0]], [body_left[1]]], dtype=np.float32)
-        body_right = np.array([[body_right[0]], [body_right[1]]], dtype=np.float32)
 
         # Triangulate the points
         tip_4d = cv2.triangulatePoints(self.P_left_matrix, self.P_right_matrix, tip_left, tip_right)
         base_4d = cv2.triangulatePoints(self.P_left_matrix, self.P_right_matrix, base_left, base_right)
-        body_4d = cv2.triangulatePoints(self.P_left_matrix, self.P_right_matrix, body_left, body_right)
                                         
         # Convert from homogeneous coordinates to 3D.
         tip_3d = tip_4d[:3] / tip_4d[3]
         base_3d = base_4d[:3] / base_4d[3]
-        body_3d = body_4d[:3] / body_4d[3]
-        
-        if body_3d is not None:
-            # Apply filtering to body coordinates
-            self.cur_body_3d = self.filter_coordinates(body_3d)
-        else:
-            print("Couldn't detect the body in both images.")
 
+        # If with body
+        body_3d = None
+        if with_body:
+            body_left = self.detect_body(img_left)
+            body_right = self.detect_body(img_right)
+            if body_left is None or body_right is None:
+                print("Couldn't detect body points in both images.")
+                return tip_3d, base_3d, None
+            body_left = np.array([[body_left[0]], [body_left[1]]], dtype=np.float32)
+            body_right = np.array([[body_right[0]], [body_right[1]]], dtype=np.float32)
+            body_4d = cv2.triangulatePoints(self.P_left_matrix, self.P_right_matrix, body_left, body_right)
+            body_3d = body_4d[:3] / body_4d[3]
 
-        return tip_3d, base_3d
+        return tip_3d, base_3d, body_3d
 
     def write_data_buffer_to_csv(self):
         """

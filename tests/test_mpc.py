@@ -7,13 +7,13 @@ import threading
 import signal
 import time
 import os
-
-from utils.mpc_functions import load_trajectory_data
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.pressure_loader import PressureLoader
 import src.config as config
 from src.robot_env import RobotEnv
 from utils.circle_arc import calculate_circle_through_points
+from utils.mpc_functions import load_trajectory_data
+
 
 def apply_transformation(points_3d, matrix_4x4):
     """
@@ -56,7 +56,7 @@ def main():
         return
     
     # Load transformation matrix
-    transformation_matrix_file = "transformation_matrix.npy"
+    transformation_matrix_file = os.path.join(config.data_dir, "robot_calibration", "transformation_matrix.npy")
     T_exec_to_plan = np.load(transformation_matrix_file)
     print(f"Loaded transformation matrix (T_exec_to_plan) from {transformation_matrix_file}:")
     print(T_exec_to_plan)
@@ -69,10 +69,11 @@ def main():
     print(f"Loaded reference trajectory with shape {ref_trajectory.shape}")
     print(f"Loaded control inputs with shape {control_inputs.shape}")
 
-    # Load pressure 
-    offsets = []
-    pressure_loader = PressureLoader()
-    offsets = pressure_loader.load_pressure()
+    # # Load pressure 
+    # offsets = []
+    # pressure_loader = PressureLoader()
+    # offsets = pressure_loader.load_pressure()
+    offsets = np.zeros(control_inputs.shape[1])  # Temp assuming no offsets for simplicity
     
     # Create robot environment
     env = RobotEnv()
@@ -180,110 +181,98 @@ def main():
             base = env.robot_api.get_tracker().get_current_base()
             tip = env.robot_api.get_tracker().get_current_tip()
             body = env.robot_api.get_tracker().get_current_body()
-            
+
             # Initialize position arrays
             base_x, base_y, base_z = [], [], []
             tip_x, tip_y, tip_z = [], [], []
             body_x, body_y, body_z = [], [], []
-            
+
             # Process base position
             if base is not None:
                 base = base.ravel()
                 base_x, base_y, base_z = [base[0]], [base[1]], [base[2]]
-                
+
             # Process tip position
             if tip is not None:
                 tip = tip.ravel()
                 tip_x, tip_y, tip_z = [tip[0]], [tip[1]], [tip[2]]
-                
+
             # Process body position
             if body is not None:
                 body = body.ravel()
                 body_x, body_y, body_z = [body[0]], [body[1]], [body[2]]
-            
-            # Calculate delta positions relative to base
-            if base_x and base_y and base_z and tip_x and tip_y and tip_z:
-                dif_x, dif_y, dif_z = [tip_x[0] - base_x[0]], [tip_y[0] - base_y[0]], [tip_z[0] - base_z[0]]
-                
-                # Track actual position for analysis
-                current_pos = np.array([dif_x[0], dif_y[0], dif_z[0]])
 
+            # Calculate delta positions for tip (relative to base)
+            dif_x, dif_y, dif_z = [], [], []
+            current_pos = None
+            if base_x and tip_x:
+                dif_x = [tip_x[0] - base_x[0]]
+                dif_y = [tip_y[0] - base_y[0]]
+                dif_z = [tip_z[0] - base_z[0]]
+                current_pos = np.array([dif_x[0], dif_y[0], dif_z[0]])
                 # Apply transformation to current position
                 current_pos = apply_transformation(current_pos, T_exec_to_plan)
-
-                # Append to position history
                 position_history.append(current_pos)
-                
                 # Calculate error if we're following the trajectory
                 current_step = step_info["current"]
                 if current_step < total_steps:
                     target_pos = ref_trajectory[current_step]
                     error = np.linalg.norm(current_pos - target_pos)
                     error_history.append(error)
-                    
-                    # Update UI with current step and error
                     step_text.set_text(f"Step: {current_step+1}/{total_steps}")
                     error_text.set_text(f"Error: {error:.4f}")
             else:
                 dif_x, dif_y, dif_z = [], [], []
-                
-            if body_x and body_y and body_z:
-                body_dif_x, body_dif_y, body_dif_z = [body_x[0]-base_x[0]], [body_y[0]-base_y[0]], [body_z[0]-base_z[0]]
-            else:
-                body_dif_x, body_dif_y, body_dif_z = [], [], []
-            
+
+            # Calculate delta positions for body (relative to base)
+            body_dif_x, body_dif_y, body_dif_z = [], [], []
+            if base_x and body_x:
+                body_dif_x = [body_x[0] - base_x[0]]
+                body_dif_y = [body_y[0] - base_y[0]]
+                body_dif_z = [body_z[0] - base_z[0]]
+
             # Transform the points before plotting
-            origin_base = apply_transformation(np.array([0, 0, 0]), T_exec_to_plan) # origin_base is a (3,) array
+            origin_base = apply_transformation(np.array([0, 0, 0]), T_exec_to_plan)
 
             # Transform dif_x, dif_y, dif_z if they contain data
-            if dif_x: # Check if dif_x list is not empty (i.e., data was available for tip)
-                point_to_transform_tip = np.array([dif_x[0], dif_y[0], dif_z[0]]) # Create (3,) array
-                transformed_tip_point = apply_transformation(point_to_transform_tip, T_exec_to_plan) # Returns (3,) array
-                # Update dif_x, dif_y, dif_z to be lists of single transformed coords
+            if dif_x:
+                point_to_transform_tip = np.array([dif_x[0], dif_y[0], dif_z[0]])
+                transformed_tip_point = apply_transformation(point_to_transform_tip, T_exec_to_plan)
                 dif_x = [transformed_tip_point[0]]
                 dif_y = [transformed_tip_point[1]]
                 dif_z = [transformed_tip_point[2]]
-            # else: dif_x, dif_y, dif_z remain empty lists, e.g. [], [], []
 
             # Transform body_dif_x, body_dif_y, body_dif_z if they contain data
-            if body_dif_x: # Check if body_dif_x list is not empty
-                point_to_transform_body = np.array([body_dif_x[0], body_dif_y[0], body_dif_z[0]]) # Create (3,) array
-                transformed_body_point = apply_transformation(point_to_transform_body, T_exec_to_plan) # Returns (3,) array
-                # Update body_dif_x, body_dif_y, body_dif_z to be lists of single transformed coords
+            if body_dif_x:
+                point_to_transform_body = np.array([body_dif_x[0], body_dif_y[0], body_dif_z[0]])
+                transformed_body_point = apply_transformation(point_to_transform_body, T_exec_to_plan)
                 body_dif_x = [transformed_body_point[0]]
                 body_dif_y = [transformed_body_point[1]]
                 body_dif_z = [transformed_body_point[2]]
-            # else: body_dif_x, body_dif_y, body_dif_z remain empty lists
-            
+
             # Update scatter plot positions
             base_scatter._offsets3d = ([origin_base[0]], [origin_base[1]], [origin_base[2]])
             tip_scatter._offsets3d = (dif_x, dif_y, dif_z)
             body_scatter._offsets3d = (body_dif_x, body_dif_y, body_dif_z)
-            
+
             # Clear previous circle line
             for line in list(ax.get_lines()):
                 if not line.get_label() == "Planned Trajectory":
                     line.remove()
-            
-            # Draw circle if we have all three points
-            if base is not None and tip is not None and body is not None:
-                circle_points = calculate_circle_through_points(body-base, tip-base, [0,0,0])
-                ax.plot(circle_points[:, 0], circle_points[:, 1], circle_points[:, 2],
-                        color="blue", linewidth=1, alpha=0.5)
-            
+
             # If we have position history, plot the actual trajectory
             if len(position_history) > 1:
                 positions = np.array(position_history)
                 ax.plot(positions[:, 0], positions[:, 1], positions[:, 2], 
                         'r-', linewidth=1, alpha=0.7, label="Actual Path")
-                
+
             # Garbage collection every 50 frames
             if frame % 50 == 0:
                 import gc
                 gc.collect()
-            
+
             return base_scatter, tip_scatter, body_scatter, step_text, error_text
-            
+
         except Exception as e:
             print(f"Animation error: {e}")
             return base_scatter, tip_scatter, body_scatter
