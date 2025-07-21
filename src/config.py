@@ -16,7 +16,7 @@ if new_experiment:
         "\n\nIMPORTANT: Check if the camera indexes are correct every time you run the code.\n\n"
     )
 cam_left_index = 0
-cam_right_index = 3
+cam_right_index = 2
 P_left_yaml = os.path.abspath(
     os.path.join(
         "calibration", "calibration_images_camleft_640x480p", "projection_matrix.yaml"
