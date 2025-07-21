@@ -5,6 +5,7 @@ import struct
 import threading
 import time
 import numpy as np
+import pandas as pd
 from zaber_motion import Units
 from zaber_motion.ascii import Connection
 import cv2
@@ -30,11 +31,14 @@ class Explorer:
             self.start_delay = 0.01 # ms
             self.save_signal = False
             self.temp_csv_path = config.exp_temp_csv
+            if os.path.exists(self.temp_csv_path):
+                os.remove(self.temp_csv_path)
             today = time.strftime("%Y-%m-%d")
             time_now = time.strftime("%H-%M-%S")
             experiment_name = "exp_" + today + "_" + time_now
             save_dir = os.path.abspath(os.path.join(".", "data", experiment_name))
             self.rt_data_csv_path = os.path.abspath(os.path.join(save_dir, f"output_{experiment_name}.csv"))
+
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
 
@@ -42,7 +46,7 @@ class Explorer:
                 # Define the fieldnames for the joined CSV
                 fieldnames = [
                     'trajectory',
-                    'dt (ms)',
+                    'T (ms)',
                     'volume_1 (mm)',
                     'volume_2 (mm)',
                     'volume_3 (mm)',
@@ -145,54 +149,79 @@ class Explorer:
     def join_temp_files(self):
         """
         Join the temporary files into the main csv file.
-        explorer fills the columns: 'trajectory', 'dt (ms)', 'volume_1 (mm)', 'volume_2 (mm)', 'volume_3 (mm)',
+        explorer fills the columns: 'trajectory', 'T (ms)', 'volume_1 (mm)', 'volume_2 (mm)', 'volume_3 (mm)',
         tracker fills the columns: 'k', 'pressure_1', 'pressure_2', 'pressure_3', 'base_x', 'base_y', 'base_z', 'tip_x', 'tip_y', 'tip_z', 'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z', 'tip_acceleration_x', 'tip_acceleration_y', 'tip_acceleration_z'
         They are joint in a single new file appending the columns from the tracker to the explorer csv file.
 
         """
-        if not os.path.exists(self.temp_csv_path):
-            print("Temporary file does not exist:", self.temp_csv_path)
-            return
-        
-        # Read explorer data
-        explorer_data = []
-        with open(config.exp_temp_csv, mode="r") as csvfile:
-            reader = csv.DictReader(csvfile)
-            explorer_data = list(reader)
-        if not explorer_data:
-            print("Explorer data is empty.")
-            return
-        
-        # Read tracker data
-        tracker_data = []
-        with open(self.temp_csv_path, mode="r") as csvfile:
-            reader = csv.DictReader(csvfile)
-            tracker_data = list(reader)
-        if not tracker_data:
-            print("Tracker data is empty.")
-            return
-        
-        # Check if the number of rows match
-        if len(explorer_data) != len(tracker_data):
-            print("Error: The number of rows in explorer and tracker data do not match.")
-            return
-        
-        # New file to save the joined data
-        with open(self.rt_data_csv_path, mode="a", newline="") as csvfile:
-            fieldnames = list(explorer_data[0].keys()) + list(tracker_data[0].keys())
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        try:
+            # Load both CSV files
+            exp_df = pd.read_csv(config.exp_temp_csv)
+            trk_df = pd.read_csv(config.track_temp_csv)
+            exp_length = len(exp_df)
+            trk_length = len(trk_df)
 
-            # Write the joined data
-            for i in range(1, len(explorer_data)):
-                row = {**explorer_data[i], **tracker_data[i]}
-                writer.writerow(row)
-        print(f"Joint data saved to {self.rt_data_csv_path}")
-        self.save_signal = False  # Reset the save signal after joining files
+            if exp_df.empty or trk_df.empty:
+                print("One of the DataFrames is empty.")
+                return
 
-        # Remove the temporary files
-        os.remove(config.track_temp_csv)
-        os.remove(config.exp_temp_csv)
-        print("Temporary files removed.")
+            print("Explorer DataFrame:")
+            print(exp_df.head())
+            print("Tracker DataFrame:")
+            print(trk_df.head())
+
+            # Use time columns for alignment
+            explorer_time = exp_df.iloc[:, 1].to_numpy() / 1000.0 # 'T (ms)' in seconds
+            tracker_time = trk_df['timestamp'].to_numpy() - trk_df['timestamp'].iloc[0]
+            tracker_time = tracker_time.astype(float)
+
+            print(f"Explorer total time: {explorer_time[-1]} seconds")
+            print(f"Tracker total time: {tracker_time[-1]} seconds")
+
+            # Interpolate Explorer data to Tracker timestamps if lengths do not match 
+            # TODO:check this ai code it may be shit 
+            if exp_length != trk_length:
+                print("Lengths do not match, resampling...")
+                # Set unique index for interpolation
+                exp_df_interp = exp_df.copy()
+                exp_df_interp['time_s'] = explorer_time
+                # Interpolate each column except 'trajectory' and 'time_s'
+                interp_cols = [col for col in exp_df_interp.columns if col not in ['trajectory', 'T (ms)', 'time_s']]
+                # Build new DataFrame with interpolated values
+                interp_dict = {'trajectory': exp_df_interp['trajectory'].iloc[0] if 'trajectory' in exp_df_interp.columns else 0,
+                              'T (ms)': tracker_time * 1000.0}
+                for col in interp_cols:
+                    interp_dict[col] = np.interp(tracker_time, exp_df_interp['time_s'], exp_df_interp[col])
+                exp_df_resampled = pd.DataFrame(interp_dict)
+                print(f"Resampled Explorer DataFrame to {len(exp_df_resampled)} rows")
+            else:
+                exp_df_resampled = exp_df.copy()
+
+
+            # Reset index for joining
+            exp_df_resampled = exp_df_resampled.reset_index(drop=True)
+            trk_df = trk_df.reset_index(drop=True)
+
+            # Join the two dataframes on the index
+            joined_df = pd.concat([exp_df_resampled, trk_df], axis=1)
+
+            # Save the joined dataframe to the output file
+            joined_df.to_csv(self.rt_data_csv_path, index=False)
+            print(f"Joined data saved to {self.rt_data_csv_path}")
+
+            # Remove the temporary files
+            os.remove(config.track_temp_csv)
+            os.remove(config.exp_temp_csv)
+            print("Temporary files removed.")
+
+            # Reset the save signal after joining files
+            self.save_signal = False
+
+        except Exception as e:
+            print("Error reading CSV files:")
+            print(e)
+            return
+
 
     def listen_pressure_udp(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -359,13 +388,13 @@ class Explorer:
         Run random trajectories and signal the tracker to track the movements.
         """
 
-        # Initi csv file
+        # Init csv file
         with open(self.temp_csv_path, mode="w", newline="") as csvfile:
             fieldnames = ['trajectory', 
-                            'dt (ms)', 
-                            'volume_1 (mm)', 
-                            'volume_2 (mm)', 
-                            'volume_3 (mm)',
+                        'T (ms)', 
+                        'volume_1 (mm)', 
+                        'volume_2 (mm)', 
+                        'volume_3 (mm)',
                         ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
@@ -383,10 +412,11 @@ class Explorer:
             self.start_scopes()
 
             # Get the next position
-            next_points = np.random.uniform(0, 3*config.max_stroke, size=(3,))
+            next_points = np.random.uniform(0, config.max_stroke, size=(3,))
 
             # Send the track signal to the tracker
             self.send_track_signal(True)
+            time.sleep(0.5) # With this delay the tracking duration is almost always 0.1 s longer than the trajectory duration
             start = time.time()
 
             # Move the motors to the next points
@@ -396,15 +426,17 @@ class Explorer:
             self.axis_1.wait_until_idle()
             self.axis_2.wait_until_idle()    
             self.axis_3.wait_until_idle()
+            time.sleep(0.1)
 
             # Stop the track signal
             end_time = time.time()
-            self.dt = (end_time - start)
-            print(f"Time taken for trajectory: {self.dt} s")
+            traj_time = (end_time - start)
+            print(f"Time taken for trajectory: {traj_time} s")
             self.send_track_signal(False)
+            time.sleep(0.001)
 
             # Write volumes to csv
-            self.write_volumes_to_csv()
+            self.write_volumes_to_csv(traj_n)
 
             # Wait for the save signal to be true before joining the two csv
             while not self.save_signal:
@@ -416,7 +448,7 @@ class Explorer:
             # Increase the traj_n
             traj_n += 1
 
-            time.sleep(0.1)  # Small delay to ensure the tracker has time to process the data
+            time.sleep(0.01)  # Small delay to ensure the tracker has time to process the data
 
         # After all trajectories are done, send the quit signal to the tracker
         print("\nAll trajectories completed. Sending quit signal to tracker.")
@@ -427,6 +459,14 @@ class Explorer:
         time.sleep(0.1)  # Small delay to ensure the quit signal is sent
         udp_listener_thread.join()
         time.sleep(0.1)  # Small delay to ensure the listener thread has time to finish
+
+        # Move to the initial position
+        self.axis_1.move_absolute(self.initial_pos_1, Units.LENGTH_MILLIMETRES, False)
+        self.axis_2.move_absolute(self.initial_pos_2, Units.LENGTH_MILLIMETRES, False)
+        self.axis_3.move_absolute(self.initial_pos_3, Units.LENGTH_MILLIMETRES, False)
+        self.axis_1.wait_until_idle()
+        self.axis_2.wait_until_idle()
+        self.axis_3.wait_until_idle()
 
         return
 
@@ -481,7 +521,7 @@ class Explorer:
         self.scope_3.start()
         time.sleep(self.start_delay / 1000)  # Convert ms to seconds for sleep
 
-    def write_volumes_to_csv(self):
+    def write_volumes_to_csv(self, trajectory):
         """
         Write the volumes to a csv file.
         """
@@ -508,9 +548,10 @@ class Explorer:
 
         with open(self.temp_csv_path, 'a') as file:
             for i in range(min(len(encoder_samples_1), len(encoder_samples_2), len(encoder_samples_3))):
+                file.write(f'{trajectory},')
                 file.write(f'{round(encoder_1_times[i],4)},')
                 file.write(f'{encoder_samples_1[i]},{encoder_samples_2[i]},{encoder_samples_3[i]}\n')
-        print(f"Wrote {i} rows to {self.temp_csv_path}")
+        print(f"Written {i} rows to {self.temp_csv_path}")
 
     def send_track_signal(self, track_signal):
         """

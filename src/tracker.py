@@ -83,6 +83,8 @@ class Tracker:
             self.data_buffer = []  # Buffer to store data in memory before writing to file
 
             # Create a temporary csv file for real-time tracking    
+            if os.path.exists(self.temp_csv_path):
+                os.remove(self.temp_csv_path)
             os.makedirs(os.path.dirname(self.temp_csv_path), exist_ok=True)
 
             # input variables
@@ -356,6 +358,7 @@ class Tracker:
             return
 
         k = 0
+        last_timestamp = None
         while self.quit is False:
             if self.track:
                 
@@ -365,18 +368,17 @@ class Tracker:
                 # Start the timer
                 start_track = time.time()
 
+                # Take timestamp 
+                timestamp = time.time()
+
                 # Read the frames from the camera threads
-                start_read = time.time()
+                if debug: start_read = time.time()
                 ret_left, frame_left = cam_left.read()
                 ret_right, frame_right = cam_right.read()
-                end_read = time.time()
-                read_time = end_read - start_read
-                L_w = cam_left.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-                L_h = cam_left.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                R_w = cam_right.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-                R_h = cam_right.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                if debug: print("\r\nReading frames at resolution L:{}x{} and R:{}x{}".format(L_w, L_h, R_w, R_h), end="", flush=True)
-                if debug: print("\r\nRead time: {} ms".format(round(read_time*1000, 3)))
+                if debug: 
+                    end_read = time.time()
+                    read_time = end_read - start_read
+                    print("\r\nRead time: {} ms".format(round(read_time*1000, 3)))
 
                 # Read pressure as close as possible to the frame reading
                 pressure_1, pressure_2, pressure_3 = self.get_pressure()
@@ -387,29 +389,32 @@ class Tracker:
                     break
 
                 # Triangulate the points
-                start_triangulate = time.time()
+                if debug: start_triangulate = time.time()
                 tip_3d, base_3d, _ = self.triangulate(frame_left, frame_right, with_body=False)
                 if tip_3d is None or base_3d is None:
                     print("\nBad triangulation. Skipping this iteration.")
                     continue
-                end_triangulate = time.time()
-                triangulation_time = end_triangulate - start_triangulate
-                if debug: print("\rTriangulation time: {} ms".format(round(triangulation_time*1000, 3)))
+                if debug: 
+                    end_triangulate = time.time()
+                    triangulation_time = end_triangulate - start_triangulate
+                    print("\rTriangulation time: {} ms".format(round(triangulation_time*1000, 3)))
 
                 # Set the current tip and base positions
-                start_buffer = time.time()
+                if debug: start_buffer = time.time()
                 self.cur_tip_3d = tip_3d - base_3d # NOTE: tip position is relative to the base position
                 self.cur_base_3d = base_3d
 
                 # If there are at least two previous positions calculate velocity
+                # TODO: filter velocity and acceleration since they have very high values
                 if self.prev_tip_3d is not None and self.prev_base_3d is not None:
+                    dt = timestamp - last_timestamp
                     # Calculate the velocity of the tip and base
-                    self.cur_tip_vel_3d = (self.cur_tip_3d - self.prev_tip_3d) / self.dt
-                    self.cur_base_vel_3d = (self.cur_base_3d - self.prev_base_3d) / self.dt
+                    self.cur_tip_vel_3d = (self.cur_tip_3d - self.prev_tip_3d) / dt
+                    self.cur_base_vel_3d = (self.cur_base_3d - self.prev_base_3d) / dt
 
                     # Calculate the acceleration of the tip
                     if self.prev_tip_vel_3d is not None:
-                        self.cur_tip_acc_3d = (self.cur_tip_vel_3d - self.prev_tip_vel_3d) / self.dt
+                        self.cur_tip_acc_3d = (self.cur_tip_vel_3d - self.prev_tip_vel_3d) / dt
 
                 # Buffer the real-time tracking data in memory
                 row = {
@@ -417,28 +422,25 @@ class Tracker:
                     'pressure_1': p[0] if p[0] is not None else None,
                     'pressure_2': p[1] if p[1] is not None else None,
                     'pressure_3': p[2] if p[2] is not None else None,
-                    'base_x': self.cur_base_3d[0] if self.cur_base_3d is not None else None,
-                    'base_y': self.cur_base_3d[1] if self.cur_base_3d is not None else None,
-                    'base_z': self.cur_base_3d[2] if self.cur_base_3d is not None else None,
-                    'tip_x': self.cur_tip_3d[0] if self.cur_tip_3d is not None else None,
-                    'tip_y': self.cur_tip_3d[1] if self.cur_tip_3d is not None else None,
-                    'tip_z': self.cur_tip_3d[2] if self.cur_tip_3d is not None else None,
-                    'tip_velocity_x': self.cur_tip_vel_3d[0] if self.cur_tip_vel_3d is not None else None,
-                    'tip_velocity_y': self.cur_tip_vel_3d[1] if self.cur_tip_vel_3d is not None else None,
-                    'tip_velocity_z': self.cur_tip_vel_3d[2] if self.cur_tip_vel_3d is not None else None,
-                    'tip_acceleration_x': self.cur_tip_acc_3d[0] if self.cur_tip_acc_3d is not None else None,
-                    'tip_acceleration_y': self.cur_tip_acc_3d[1] if self.cur_tip_acc_3d is not None else None,
-                    'tip_acceleration_z': self.cur_tip_acc_3d[2] if self.cur_tip_acc_3d is not None else None
+                    'base_x': self.cur_base_3d[0][0] if self.cur_base_3d is not None else None,
+                    'base_y': self.cur_base_3d[1][0] if self.cur_base_3d is not None else None,
+                    'base_z': self.cur_base_3d[2][0] if self.cur_base_3d is not None else None,
+                    'tip_x': self.cur_tip_3d[0][0] if self.cur_tip_3d is not None else None,
+                    'tip_y': self.cur_tip_3d[1][0] if self.cur_tip_3d is not None else None,
+                    'tip_z': self.cur_tip_3d[2][0] if self.cur_tip_3d is not None else None,
+                    'tip_velocity_x': self.cur_tip_vel_3d[0][0] if self.cur_tip_vel_3d is not None else None,
+                    'tip_velocity_y': self.cur_tip_vel_3d[1][0] if self.cur_tip_vel_3d is not None else None,
+                    'tip_velocity_z': self.cur_tip_vel_3d[2][0] if self.cur_tip_vel_3d is not None else None,
+                    'tip_acceleration_x': self.cur_tip_acc_3d[0][0] if self.cur_tip_acc_3d is not None else None,
+                    'tip_acceleration_y': self.cur_tip_acc_3d[1][0] if self.cur_tip_acc_3d is not None else None,
+                    'tip_acceleration_z': self.cur_tip_acc_3d[2][0] if self.cur_tip_acc_3d is not None else None,
+                    'timestamp': timestamp,
                 }
                 self.data_buffer.append(row)
-                end_buffer = time.time()
-                buffer_time = end_buffer - start_buffer
-                if debug: print("\rBuffering time: {} ms".format(round(buffer_time*1000, 3)))
-
-                # Measure tracking time
-                end_track = time.time()
-                tracking_time = end_track - start_track
-                if debug: print("\rTracking time: {} ms".format(round(tracking_time*1000, 3)))
+                if debug: 
+                    end_buffer = time.time()
+                    buffer_time = end_buffer - start_buffer
+                    print("\rBuffering time: {} ms".format(round(buffer_time*1000, 3)))
 
                 # Update the previous positions and velocities
                 self.prev_tip_3d = self.cur_tip_3d.copy()
@@ -446,12 +448,23 @@ class Tracker:
                 if self.cur_tip_vel_3d is not None:
                     self.prev_tip_vel_3d = self.cur_tip_vel_3d.copy() 
 
+                # Update the last timestamp
+                last_timestamp = timestamp
+
                 # Update counter
                 k += 1
+
+                # Measure tracking time
+                end_track = time.time()
+                tracking_time = end_track - start_track
+                if debug: print("\rTracking time: {} ms".format(round(tracking_time*1000, 3)))
+                
             else:
                 # If data buffer is not empty write to file
                 if self.data_buffer != []:
                     self.write_data_buffer_to_csv()
+                    # Clear the buffer after writing to only write once
+                    self.data_buffer = []  
 
         # Wait for the threads to finish
         self.udp_thread_pressure.join()
@@ -681,13 +694,14 @@ class Tracker:
         """
         Write the buffered data to the CSV file.
         """
-
+ 
         # Prepare to buffer data in memory
         fieldnames = [
-            'k', 'pressure_1', 'pressure_2', 'pressure_3',
-            'base_x', 'base_y', 'base_z', 'tip_x', 'tip_y', 'tip_z',
-            'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z',
-            'tip_acceleration_x', 'tip_acceleration_y', 'tip_acceleration_z'
+            'k', 'pressure_1 (bar)', 'pressure_2 (bar)', 'pressure_3 (bar)',
+            'base_x (cm)', 'base_y (cm)', 'base_z (cm)', 'tip_x (cm)', 'tip_y (cm)', 'tip_z (cm)',
+            'tip_velocity_x (cm/s)', 'tip_velocity_y (cm/s)', 'tip_velocity_z (cm/s)',
+            'tip_acceleration_x (cm/ss)', 'tip_acceleration_y (cm/ss)', 'tip_acceleration_z (cm/ss)',
+            'timestamp'
         ]
 
         # Ensure the CSV file exists and has the correct header
@@ -700,8 +714,7 @@ class Tracker:
             writer = csv.DictWriter(csvfile, fieldnames=self.data_buffer[0].keys())
             for row in self.data_buffer:
                 writer.writerow(row)
-        print(f"Wrote {len(self.data_buffer)} rows to {self.temp_csv_path}")
-        self.data_buffer = []  # Clear the buffer after writing
+        print(f"Written {len(self.data_buffer)} rows to {self.temp_csv_path}")
 
         # Send the save signal to the explorer
         self.send_save_signal(True)
