@@ -90,7 +90,7 @@ home_first = False
 init_pressure = 0.5
 initial_pos = 115
 window_steps = 20  # Windows length in steps
-max_stroke = 4  # distance in mm from the initial position to final position
+max_stroke = 5  # distance in mm from the initial position to final position
 steps = 40  # Suggestion: use utils/workspace_preview.py
 
 elongationstepSize = (
@@ -114,7 +114,7 @@ UDP_QUIT_TRACK_PORT = 25003 # From explorer to tracker to quit execution
 
 # Number of trajectory for realtime data collection
 # Remember max samples per oscilloscope is 1024
-N_TRAJECTORIES = 10
+N_TRAJECTORIES = 1000
 # Time between two consecutive samples in milliseconds
 # Note: the total duration of the zaber oscilloscope record will be 1024 * SCOPE_RECORD_DT / 1000 seconds 
 SCOPE_RECORD_DT = 2 # Total record time will be 2.048 seconds, so make sure trajectories are shorter than this  

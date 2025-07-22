@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Path to your CSV file
-csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-07-22_11-54-58\output_exp_2025-07-22_11-54-58.csv"
+csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-07-22_12-23-07\output_exp_2025-07-22_12-23-07.csv"
 
 # Read the CSV
 df = pd.read_csv(csv_path)
