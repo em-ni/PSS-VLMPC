@@ -8,7 +8,7 @@ Follow the installation guide in the original [repo](https://github.com/TUM-AAS/
 In particular build and install [acados](https://docs.acados.org/installation/index.html)
 
 ## env
-After acados is built and installed in <acados_root>, create the venv
+After acados is built and installed in <acados_root> (e.g. ~/acados), create the venv
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
@@ -16,9 +16,9 @@ sudo apt install python3.9
 sudo apt install python3.9-distutils
 virtualenv env --python=/usr/bin/python3.9
 source env/bin/activate
-pip install --use-pep517 -e <acados_root>/interfaces/acados_template
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"<acados_root>/lib"
-export ACADOS_SOURCE_DIR="<acados_root>"
+pip install --use-pep517 -e ~/acados/interfaces/acados_template
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"~/acados/lib" (better with explicit path without ~)
+export ACADOS_SOURCE_DIR="~/acados" (better with explicit path without ~)
 
 ## How to Run Example
 Train the NN, then run the MPC

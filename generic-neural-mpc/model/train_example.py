@@ -1,10 +1,11 @@
+import sys
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 from tqdm import tqdm
 import os
-
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SystemConfig, NeuralNetConfig, TrainingConfig
 
 def true_system_dynamics_dt(x, u):

@@ -1,6 +1,8 @@
+import os
+import sys
 import torch
 import numpy as np
-
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SystemConfig, TrainingConfig
 from model.train_example import NeuralNetwork, true_system_dynamics_dt
 

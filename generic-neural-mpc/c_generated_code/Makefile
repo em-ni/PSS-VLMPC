@@ -71,8 +71,8 @@ OBJ+= $(OCP_OBJ)
 EXTERNAL_DIR=
 EXTERNAL_LIB=
 
-INCLUDE_PATH = ~/acados/include
-LIB_PATH = ~/acados/lib
+INCLUDE_PATH = /home/z5440219/acados/include
+LIB_PATH = /home/z5440219/acados/lib
 
 # preprocessor flags for make's implicit rules
 CPPFLAGS+= -I$(INCLUDE_PATH)
@@ -132,7 +132,7 @@ ocp_cython_c: ocp_shared_lib
 	-o acados_ocp_solver_pyx.c \
 	-I $(INCLUDE_PATH)/../interfaces/acados_template/acados_template \
 	$(INCLUDE_PATH)/../interfaces/acados_template/acados_template/acados_ocp_solver_pyx.pyx \
-	-I /mnt/c/Users/z5440219/OneDrive - UNSW/Desktop/github/sorolearn/generic-neural-mpc/c_generated_code \
+	-I /home/z5440219/github/sorolearn/generic-neural-mpc/c_generated_code \
 
 ocp_cython_o: ocp_cython_c
 	$(CC) $(ACADOS_FLAGS) -c -O2 \
@@ -141,7 +141,7 @@ ocp_cython_o: ocp_cython_c
 	-I $(INCLUDE_PATH)/blasfeo/include/ \
 	-I $(INCLUDE_PATH)/hpipm/include/ \
 	-I $(INCLUDE_PATH) \
-	-I /mnt/c/Users/z5440219/OneDrive - UNSW/Desktop/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include \
+	-I /home/z5440219/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include \
 	-I /usr/include/python3.9 \
 	acados_ocp_solver_pyx.c \
 
@@ -160,7 +160,7 @@ sim_cython_c: sim_shared_lib
 	-o acados_sim_solver_pyx.c \
 	-I $(INCLUDE_PATH)/../interfaces/acados_template/acados_template \
 	$(INCLUDE_PATH)/../interfaces/acados_template/acados_template/acados_sim_solver_pyx.pyx \
-	-I /mnt/c/Users/z5440219/OneDrive - UNSW/Desktop/github/sorolearn/generic-neural-mpc/c_generated_code \
+	-I /home/z5440219/github/sorolearn/generic-neural-mpc/c_generated_code \
 
 sim_cython_o: sim_cython_c
 	$(CC) $(ACADOS_FLAGS) -c -O2 \
@@ -169,7 +169,7 @@ sim_cython_o: sim_cython_c
 	-I $(INCLUDE_PATH)/blasfeo/include/ \
 	-I $(INCLUDE_PATH)/hpipm/include/ \
 	-I $(INCLUDE_PATH) \
-	-I /mnt/c/Users/z5440219/OneDrive - UNSW/Desktop/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include \
+	-I /home/z5440219/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include \
 	-I /usr/include/python3.9 \
 	acados_sim_solver_pyx.c \
 

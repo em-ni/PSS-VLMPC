@@ -1,7 +1,7 @@
 {
-    "acados_include_path": "~/acados/include",
-    "acados_lib_path": "~/acados/lib",
-    "code_export_directory": "/mnt/c/Users/z5440219/OneDrive - UNSW/Desktop/github/sorolearn/generic-neural-mpc/c_generated_code",
+    "acados_include_path": "/home/z5440219/acados/include",
+    "acados_lib_path": "/home/z5440219/acados/lib",
+    "code_export_directory": "/home/z5440219/github/sorolearn/generic-neural-mpc/c_generated_code",
     "constraints": {
         "C": [],
         "C_e": [],
@@ -716,7 +716,7 @@
         "zu_e": []
     },
     "cython_include_dirs": [
-        "/mnt/c/Users/z5440219/OneDrive - UNSW/Desktop/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include",
+        "/home/z5440219/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include",
         "/usr/include/python3.9"
     ],
     "dims": {
