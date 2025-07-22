@@ -32,7 +32,7 @@ def plot_results(t_series, x_history, u_history, x_ref_history, title="MPC Traje
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     
     # --- Save the figure instead of showing it ---
-    save_path = "simulation_results.png"
+    save_path = "example_results.png"
     plt.savefig(save_path)
     print(f"Plot saved to {os.path.abspath(save_path)}")
     plt.close(fig) # Close the figure to free up memory

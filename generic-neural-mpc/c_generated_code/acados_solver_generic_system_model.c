@@ -242,7 +242,7 @@ static ocp_nlp_dims* generic_system_model_acados_create_setup_dimensions(generic
     nsbx[0] = 0;
     ns[0] = NS0;
     
-    nbxe[0] = 4;
+    nbxe[0] = 6;
     
     ny[0] = NY0;
     nh[0] = NH0;
@@ -473,8 +473,11 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     W_0[1+(NY0) * 1] = 100;
     W_0[2+(NY0) * 2] = 100;
     W_0[3+(NY0) * 3] = 100;
-    W_0[4+(NY0) * 4] = 0.01;
-    W_0[5+(NY0) * 5] = 0.01;
+    W_0[4+(NY0) * 4] = 100;
+    W_0[5+(NY0) * 5] = 100;
+    W_0[6+(NY0) * 6] = 0.01;
+    W_0[7+(NY0) * 7] = 0.01;
+    W_0[8+(NY0) * 8] = 0.01;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "W", W_0);
     free(W_0);
     double* Vx_0 = calloc(NY0*NX, sizeof(double));
@@ -483,12 +486,15 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     Vx_0[1+(NY0) * 1] = 1;
     Vx_0[2+(NY0) * 2] = 1;
     Vx_0[3+(NY0) * 3] = 1;
+    Vx_0[4+(NY0) * 4] = 1;
+    Vx_0[5+(NY0) * 5] = 1;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "Vx", Vx_0);
     free(Vx_0);
     double* Vu_0 = calloc(NY0*NU, sizeof(double));
     // change only the non-zero elements:
-    Vu_0[4+(NY0) * 0] = 1;
-    Vu_0[5+(NY0) * 1] = 1;
+    Vu_0[6+(NY0) * 0] = 1;
+    Vu_0[7+(NY0) * 1] = 1;
+    Vu_0[8+(NY0) * 2] = 1;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "Vu", Vu_0);
     free(Vu_0);
     double* yref = calloc(NY, sizeof(double));
@@ -505,8 +511,11 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     W[1+(NY) * 1] = 100;
     W[2+(NY) * 2] = 100;
     W[3+(NY) * 3] = 100;
-    W[4+(NY) * 4] = 0.01;
-    W[5+(NY) * 5] = 0.01;
+    W[4+(NY) * 4] = 100;
+    W[5+(NY) * 5] = 100;
+    W[6+(NY) * 6] = 0.01;
+    W[7+(NY) * 7] = 0.01;
+    W[8+(NY) * 8] = 0.01;
 
     for (int i = 1; i < N; i++)
     {
@@ -519,6 +528,8 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     Vx[1+(NY) * 1] = 1;
     Vx[2+(NY) * 2] = 1;
     Vx[3+(NY) * 3] = 1;
+    Vx[4+(NY) * 4] = 1;
+    Vx[5+(NY) * 5] = 1;
     for (int i = 1; i < N; i++)
     {
         ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, i, "Vx", Vx);
@@ -528,8 +539,9 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     
     double* Vu = calloc(NY*NU, sizeof(double));
     // change only the non-zero elements:
-    Vu[4+(NY) * 0] = 1;
-    Vu[5+(NY) * 1] = 1;
+    Vu[6+(NY) * 0] = 1;
+    Vu[7+(NY) * 1] = 1;
+    Vu[8+(NY) * 2] = 1;
 
     for (int i = 1; i < N; i++)
     {
@@ -547,6 +559,8 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     W_e[1+(NYN) * 1] = 100;
     W_e[2+(NYN) * 2] = 100;
     W_e[3+(NYN) * 3] = 100;
+    W_e[4+(NYN) * 4] = 100;
+    W_e[5+(NYN) * 5] = 100;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, N, "W", W_e);
     free(W_e);
     double* Vx_e = calloc(NYN*NX, sizeof(double));
@@ -555,6 +569,8 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     Vx_e[1+(NYN) * 1] = 1;
     Vx_e[2+(NYN) * 2] = 1;
     Vx_e[3+(NYN) * 3] = 1;
+    Vx_e[4+(NYN) * 4] = 1;
+    Vx_e[5+(NYN) * 5] = 1;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, N, "Vx", Vx_e);
     free(Vx_e);
 
@@ -573,6 +589,8 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     idxbx0[1] = 1;
     idxbx0[2] = 2;
     idxbx0[3] = 3;
+    idxbx0[4] = 4;
+    idxbx0[5] = 5;
 
     double* lubx0 = calloc(2*NBX0, sizeof(double));
     double* lbx0 = lubx0;
@@ -585,11 +603,13 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     free(idxbx0);
     free(lubx0);
     // idxbxe_0
-    int* idxbxe_0 = malloc(4 * sizeof(int));
+    int* idxbxe_0 = malloc(6 * sizeof(int));
     idxbxe_0[0] = 0;
     idxbxe_0[1] = 1;
     idxbxe_0[2] = 2;
     idxbxe_0[3] = 3;
+    idxbxe_0[4] = 4;
+    idxbxe_0[5] = 5;
     ocp_nlp_constraints_model_set(nlp_config, nlp_dims, nlp_in, nlp_out, 0, "idxbxe", idxbxe_0);
     free(idxbxe_0);
 
@@ -605,6 +625,7 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     int* idxbu = malloc(NBU * sizeof(int));
     idxbu[0] = 0;
     idxbu[1] = 1;
+    idxbu[2] = 2;
     double* lubu = calloc(2*NBU, sizeof(double));
     double* lbu = lubu;
     double* ubu = lubu + NBU;
@@ -612,6 +633,8 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
     ubu[0] = 1;
     lbu[1] = -1;
     ubu[1] = 1;
+    lbu[2] = -1;
+    ubu[2] = 1;
 
     for (int i = 0; i < N; i++)
     {
@@ -942,7 +965,7 @@ int generic_system_model_acados_update_params(generic_system_model_solver_capsul
 {
     int solver_status = 0;
 
-    int casadi_np = 28;
+    int casadi_np = 60;
     if (casadi_np != np) {
         printf("acados_update_params: trying to set %i parameters for external functions."
             " External function has %i parameters. Exiting.\n", np, casadi_np);

@@ -71,8 +71,8 @@ OBJ+= $(OCP_OBJ)
 EXTERNAL_DIR=
 EXTERNAL_LIB=
 
-INCLUDE_PATH = /home/z5440219/acados/include
-LIB_PATH = /home/z5440219/acados/lib
+INCLUDE_PATH = ~/acados/include
+LIB_PATH = ~/acados/lib
 
 # preprocessor flags for make's implicit rules
 CPPFLAGS+= -I$(INCLUDE_PATH)
@@ -141,7 +141,7 @@ ocp_cython_o: ocp_cython_c
 	-I $(INCLUDE_PATH)/blasfeo/include/ \
 	-I $(INCLUDE_PATH)/hpipm/include/ \
 	-I $(INCLUDE_PATH) \
-	-I /home/z5440219/acados/neural-mpc/lib/python3.9/site-packages/numpy/_core/include \
+	-I /mnt/c/Users/z5440219/OneDrive - UNSW/Desktop/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include \
 	-I /usr/include/python3.9 \
 	acados_ocp_solver_pyx.c \
 
@@ -169,7 +169,7 @@ sim_cython_o: sim_cython_c
 	-I $(INCLUDE_PATH)/blasfeo/include/ \
 	-I $(INCLUDE_PATH)/hpipm/include/ \
 	-I $(INCLUDE_PATH) \
-	-I /home/z5440219/acados/neural-mpc/lib/python3.9/site-packages/numpy/_core/include \
+	-I /mnt/c/Users/z5440219/OneDrive - UNSW/Desktop/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include \
 	-I /usr/include/python3.9 \
 	acados_sim_solver_pyx.c \
 

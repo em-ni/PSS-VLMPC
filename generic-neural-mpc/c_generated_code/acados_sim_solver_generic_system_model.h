@@ -34,10 +34,10 @@
 #include "acados_c/sim_interface.h"
 #include "acados_c/external_function_interface.h"
 
-#define GENERIC_SYSTEM_MODEL_NX     4
+#define GENERIC_SYSTEM_MODEL_NX     6
 #define GENERIC_SYSTEM_MODEL_NZ     0
-#define GENERIC_SYSTEM_MODEL_NU     2
-#define GENERIC_SYSTEM_MODEL_NP     28
+#define GENERIC_SYSTEM_MODEL_NU     3
+#define GENERIC_SYSTEM_MODEL_NP     60
 
 #ifdef __cplusplus
 extern "C" {

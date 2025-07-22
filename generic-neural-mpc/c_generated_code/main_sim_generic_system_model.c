@@ -67,12 +67,16 @@ int main()
     x_current[1] = 0.0;
     x_current[2] = 0.0;
     x_current[3] = 0.0;
+    x_current[4] = 0.0;
+    x_current[5] = 0.0;
 
   
     x_current[0] = 0;
     x_current[1] = 0;
     x_current[2] = 0;
     x_current[3] = 0;
+    x_current[4] = 0;
+    x_current[5] = 0;
     
   
 
@@ -81,6 +85,7 @@ int main()
     double u0[NU];
     u0[0] = 0.0;
     u0[1] = 0.0;
+    u0[2] = 0.0;
     // set parameters
     double p[NP];
     p[0] = 0;
@@ -111,6 +116,38 @@ int main()
     p[25] = 0;
     p[26] = 0;
     p[27] = 0;
+    p[28] = 0;
+    p[29] = 0;
+    p[30] = 0;
+    p[31] = 0;
+    p[32] = 0;
+    p[33] = 0;
+    p[34] = 0;
+    p[35] = 0;
+    p[36] = 0;
+    p[37] = 0;
+    p[38] = 0;
+    p[39] = 0;
+    p[40] = 0;
+    p[41] = 0;
+    p[42] = 0;
+    p[43] = 0;
+    p[44] = 0;
+    p[45] = 0;
+    p[46] = 0;
+    p[47] = 0;
+    p[48] = 0;
+    p[49] = 0;
+    p[50] = 0;
+    p[51] = 0;
+    p[52] = 0;
+    p[53] = 0;
+    p[54] = 0;
+    p[55] = 0;
+    p[56] = 0;
+    p[57] = 0;
+    p[58] = 0;
+    p[59] = 0;
 
     generic_system_model_acados_sim_update_params(capsule, p, NP);
   

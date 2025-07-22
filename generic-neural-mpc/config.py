@@ -2,8 +2,8 @@ import numpy as np
 
 # --- System Configuration ---
 class SystemConfig:
-    STATE_DIM = 4
-    CONTROL_DIM = 2
+    STATE_DIM = 6
+    CONTROL_DIM = 3
 
 # --- MPC Configuration ---
 class MPCConfig:
@@ -43,5 +43,6 @@ class TrainingConfig:
     
     NUM_TRAIN_SAMPLES = 20000
     NUM_VAL_SAMPLES = 2000
-    
-    MODEL_SAVE_PATH = "model/trained_model.pth"
+
+    REAL_DATASET_PATH = "model/data/output_exp_2025-07-22_12-23-07.csv"
+    MODEL_SAVE_PATH = "model/data/trained_model.pth"
