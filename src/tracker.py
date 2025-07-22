@@ -93,10 +93,13 @@ class Tracker:
             self.cur_pressure_3 = None
 
             # Tracking variables
-            self.prev_tip_3d = None
-            self.prev_base_3d = None
+            self.pre_base_3d = None
+            self.cur_base_3d = None
+            self.pre_tip_3d = None
+            self.cur_tip_3d = None
+            self.pre_tip_vel_3d  = None
             self.cur_tip_vel_3d = None
-            self.prev_tip_vel_3d  = None
+            self.pre_tip_acc_3d = None
             self.cur_tip_acc_3d = None
 
             # Sampling frequency
@@ -190,7 +193,8 @@ class Tracker:
 
         return cx, cy
 
-    def filter_coordinates(self, new_coords):
+    def filter_body_coordinates(self, new_coords):
+        # Redundant function
         """Apply exponential moving average filter to smooth coordinates"""
         if self.filtered_body_3d is None:
             # First measurement - initialize filter
@@ -200,6 +204,15 @@ class Tracker:
             self.filtered_body_3d = self.alpha * new_coords + (1 - self.alpha) * self.filtered_body_3d
         
         return self.filtered_body_3d
+    
+    def filter_value(self, pre_filtered, new_value, alpha):
+        """
+        General exponential moving average filter for any value (array or scalar).
+        """
+        if pre_filtered is None:
+            return new_value
+        else:
+            return alpha * new_value + (1 - alpha) * pre_filtered
 
     def get_current_tip(self):
         return self.cur_tip_3d
@@ -349,7 +362,7 @@ class Tracker:
         # Use threaded camera streams
         cam_left = CameraStream(self.cam_left_index)
         cam_right = CameraStream(self.cam_right_index)
-        time.sleep(0.5)  # Let threads warm up
+        time.sleep(1)  # Let threads warm up
         # Check if cameras opened
         if not cam_left.cap.isOpened() or not cam_right.cap.isOpened():
             print("Error: Couldn't open the cameras.")
@@ -405,16 +418,26 @@ class Tracker:
                 self.cur_base_3d = base_3d
 
                 # If there are at least two previous positions calculate velocity
-                # TODO: filter velocity and acceleration since they have very high values
-                if self.prev_tip_3d is not None and self.prev_base_3d is not None:
+                if self.pre_tip_3d is not None and self.pre_base_3d is not None:
                     dt = timestamp - last_timestamp
                     # Calculate the velocity of the tip and base
-                    self.cur_tip_vel_3d = (self.cur_tip_3d - self.prev_tip_3d) / dt
-                    self.cur_base_vel_3d = (self.cur_base_3d - self.prev_base_3d) / dt
+                    self.cur_tip_vel_3d = (self.cur_tip_3d - self.pre_tip_3d) / dt
+                    self.cur_base_vel_3d = (self.cur_base_3d - self.pre_base_3d) / dt
+
+                    # Filter position
+                    self.cur_tip_3d = self.filter_value(self.pre_tip_3d, self.cur_tip_3d, self.alpha)
 
                     # Calculate the acceleration of the tip
-                    if self.prev_tip_vel_3d is not None:
-                        self.cur_tip_acc_3d = (self.cur_tip_vel_3d - self.prev_tip_vel_3d) / dt
+                    if self.pre_tip_vel_3d is not None:
+                        # Filter velocity
+                        self.cur_tip_vel_3d = self.filter_value(self.pre_tip_vel_3d, self.cur_tip_vel_3d, self.alpha)
+                        
+                        # Calculate the acceleration of the tip
+                        self.cur_tip_acc_3d = (self.cur_tip_vel_3d - self.pre_tip_vel_3d) / dt
+
+                        if self.pre_tip_acc_3d is not None:
+                            # Filter acceleration
+                            self.cur_tip_acc_3d = self.filter_value(self.pre_tip_acc_3d, self.cur_tip_acc_3d, self.alpha)
 
                 # Buffer the real-time tracking data in memory
                 row = {
@@ -443,10 +466,12 @@ class Tracker:
                     print("\rBuffering time: {} ms".format(round(buffer_time*1000, 3)))
 
                 # Update the previous positions and velocities
-                self.prev_tip_3d = self.cur_tip_3d.copy()
-                self.prev_base_3d = self.cur_base_3d.copy()
+                self.pre_tip_3d = self.cur_tip_3d.copy()
+                self.pre_base_3d = self.cur_base_3d.copy()
                 if self.cur_tip_vel_3d is not None:
-                    self.prev_tip_vel_3d = self.cur_tip_vel_3d.copy() 
+                    self.pre_tip_vel_3d = self.cur_tip_vel_3d.copy() 
+                if self.cur_tip_acc_3d is not None:
+                    self.pre_tip_acc_3d = self.cur_tip_acc_3d.copy()
 
                 # Update the last timestamp
                 last_timestamp = timestamp
@@ -522,7 +547,7 @@ class Tracker:
 
             if body_3d is not None:
                 # Apply filtering to body coordinates
-                self.cur_body_3d = self.filter_coordinates(body_3d)
+                self.cur_body_3d = self.filter_body_coordinates(body_3d)
 
             # # Display the frames
             # cv2.imshow("Left Camera", frame_left)

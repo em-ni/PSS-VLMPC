@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Path to your CSV file
-csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-07-21_18-45-03\output_exp_2025-07-21_18-45-03.csv"
+csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-07-22_11-54-58\output_exp_2025-07-22_11-54-58.csv"
 
 # Read the CSV
 df = pd.read_csv(csv_path)
@@ -39,13 +39,13 @@ for traj in trajectories:
     fig.suptitle(f"Trajectory {traj}")
 
     axs[0].plot(t, vol1)
-    axs[0].set_ylabel("Volume 1 (mm)")
+    axs[0].set_ylabel("Vol 1 (mm)")
 
     axs[1].plot(t, vol2)
-    axs[1].set_ylabel("Volume 2 (mm)")
+    axs[1].set_ylabel("Vol 2 (mm)")
 
     axs[2].plot(t, vol3)
-    axs[2].set_ylabel("Volume 3 (mm)")
+    axs[2].set_ylabel("Vol 3 (mm)")
 
     axs[3].plot(t, tip_x)
     axs[3].set_ylabel("Tip X (cm)")
@@ -57,10 +57,10 @@ for traj in trajectories:
     axs[5].set_ylabel("Tip Z (cm)")
 
     axs[6].plot(t, vnorm)
-    axs[6].set_ylabel("||Tip Velocity|| (cm/s)")
+    axs[6].set_ylabel("||v|| (cm/s)")
 
     axs[7].plot(t, anorm)
-    axs[7].set_ylabel("||Tip Acceleration|| (cm/ss)")
+    axs[7].set_ylabel("||a|| (cm/s²)")
     axs[7].set_xlabel("Time (s)")
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.97])

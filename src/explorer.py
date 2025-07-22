@@ -42,34 +42,6 @@ class Explorer:
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
 
-            with open(self.rt_data_csv_path, mode="w", newline="") as csvfile:
-                # Define the fieldnames for the joined CSV
-                fieldnames = [
-                    'trajectory',
-                    'T (ms)',
-                    'volume_1 (mm)',
-                    'volume_2 (mm)',
-                    'volume_3 (mm)',
-                    'k',
-                    'pressure_1',
-                    'pressure_2',
-                    'pressure_3',
-                    'base_x',
-                    'base_y',
-                    'base_z',
-                    'tip_x',
-                    'tip_y',
-                    'tip_z',
-                    'tip_velocity_x',
-                    'tip_velocity_y',
-                    'tip_velocity_z',
-                    'tip_acceleration_x',
-                    'tip_acceleration_y',
-                    'tip_acceleration_z'
-                ]
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-
             # Init axis and oscilloscopes
             self.axis_1 = None
             self.axis_2 = None
@@ -171,17 +143,16 @@ class Explorer:
             print(trk_df.head())
 
             # Use time columns for alignment
-            explorer_time = exp_df.iloc[:, 1].to_numpy() / 1000.0 # 'T (ms)' in seconds
-            tracker_time = trk_df['timestamp'].to_numpy() - trk_df['timestamp'].iloc[0]
+            explorer_time = exp_df['T (ms)'].to_numpy() / 1000.0 # 'T (ms)' in seconds
+            tracker_time = trk_df['timestamp'].to_numpy() - trk_df['timestamp'].iloc[0] # difference between the last and first timestamp
             tracker_time = tracker_time.astype(float)
 
             print(f"Explorer total time: {explorer_time[-1]} seconds")
             print(f"Tracker total time: {tracker_time[-1]} seconds")
 
             # Interpolate Explorer data to Tracker timestamps if lengths do not match 
-            # TODO:check this ai code it may be shit 
+            # TODO:check this ai code may be shit 
             if exp_length != trk_length:
-                print("Lengths do not match, resampling...")
                 # Set unique index for interpolation
                 exp_df_interp = exp_df.copy()
                 exp_df_interp['time_s'] = explorer_time
@@ -205,9 +176,14 @@ class Explorer:
             # Join the two dataframes on the index
             joined_df = pd.concat([exp_df_resampled, trk_df], axis=1)
 
-            # Save the joined dataframe to the output file
-            joined_df.to_csv(self.rt_data_csv_path, index=False)
-            print(f"Joined data saved to {self.rt_data_csv_path}")
+            if not os.path.exists(self.rt_data_csv_path):
+                # Save the joined dataframe to the output file
+                joined_df.to_csv(self.rt_data_csv_path, index=False)
+                print(f"Joined data saved to {self.rt_data_csv_path}")
+            else:
+                # Append to the existing file
+                joined_df.to_csv(self.rt_data_csv_path, mode='a', header=False, index=False)
+                print(f"Appended data to {self.rt_data_csv_path}")
 
             # Remove the temporary files
             os.remove(config.track_temp_csv)
@@ -221,7 +197,6 @@ class Explorer:
             print("Error reading CSV files:")
             print(e)
             return
-
 
     def listen_pressure_udp(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -388,21 +363,10 @@ class Explorer:
         Run random trajectories and signal the tracker to track the movements.
         """
 
-        # Init csv file
-        with open(self.temp_csv_path, mode="w", newline="") as csvfile:
-            fieldnames = ['trajectory', 
-                        'T (ms)', 
-                        'volume_1 (mm)', 
-                        'volume_2 (mm)', 
-                        'volume_3 (mm)',
-                        ]
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-
         # Start UDP listener for save signal
         udp_listener_thread = threading.Thread(target=self.listen_save_signal)
         udp_listener_thread.start()
-        time.sleep(0.5)  # Small delay to ensure the listener thread has time to start
+        time.sleep(1)  # Small delay to ensure the listener thread has time to start
 
         traj_n = 0
         while traj_n < config.N_TRAJECTORIES:
@@ -432,6 +396,7 @@ class Explorer:
             end_time = time.time()
             traj_time = (end_time - start)
             print(f"Time taken for trajectory: {traj_time} s")
+            time.sleep(0.5)
             self.send_track_signal(False)
             time.sleep(0.001)
 
@@ -525,6 +490,18 @@ class Explorer:
         """
         Write the volumes to a csv file.
         """
+        if not os.path.exists(self.temp_csv_path):
+            # Init csv file
+            with open(self.temp_csv_path, mode="w", newline="") as csvfile:
+                fieldnames = ['trajectory', 
+                            'T (ms)', 
+                            'volume_1 (mm)', 
+                            'volume_2 (mm)', 
+                            'volume_3 (mm)',
+                            ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+
         data_1 = self.scope_1.read()
         data_2 = self.scope_2.read()
         data_3 = self.scope_3.read()

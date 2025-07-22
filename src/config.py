@@ -114,11 +114,11 @@ UDP_QUIT_TRACK_PORT = 25003 # From explorer to tracker to quit execution
 
 # Number of trajectory for realtime data collection
 # Remember max samples per oscilloscope is 1024
-N_TRAJECTORIES = 1
+N_TRAJECTORIES = 10
 # Time between two consecutive samples in milliseconds
 # Note: the total duration of the zaber oscilloscope record will be 1024 * SCOPE_RECORD_DT / 1000 seconds 
 SCOPE_RECORD_DT = 2 # Total record time will be 2.048 seconds, so make sure trajectories are shorter than this  
-TRACK_RECORD_DT = 10  # To be added to the time needed for the actual measurement ~2.5 ms
+TRACK_RECORD_DT = 18  # To be added to the time needed for the actual measurement ~2.5 ms
 
 exp_temp_csv = os.path.join(data_dir, "temp", "rt_explorer.csv")
 track_temp_csv = os.path.join(data_dir, "temp", "rt_tracker.csv")
