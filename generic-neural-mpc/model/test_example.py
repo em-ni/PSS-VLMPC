@@ -7,11 +7,11 @@ from config import SystemConfig, TrainingConfig
 from model.train_example import NeuralNetwork, true_system_dynamics_dt
 
 def test_model():
-    print(f"Loading model from {TrainingConfig.MODEL_SAVE_PATH}...")
+    print(f"Loading model from {TrainingConfig.EX_MODEL_SAVE_PATH}...")
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
-    payload = torch.load(TrainingConfig.MODEL_SAVE_PATH, map_location=device)
+    payload = torch.load(TrainingConfig.EX_MODEL_SAVE_PATH, map_location=device)
     
     model = NeuralNetwork().to(device)
     model.load_state_dict(payload['state_dict'])

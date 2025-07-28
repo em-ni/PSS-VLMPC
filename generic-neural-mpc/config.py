@@ -1,3 +1,5 @@
+# config.py (Tuned for Stability)
+
 import numpy as np
 
 # --- System Configuration ---
@@ -12,14 +14,18 @@ class MPCConfig:
     N_HORIZON = 20  # Number of steps in the prediction horizon
     T_HORIZON = 1.0  # Total time for the prediction horizon (seconds)
     
-    # --- GENERIC COST MATRICES AND CONSTRAINTS ---
-    # State cost: Penalize the first state more, the rest less.
-    Q_first_state = 1000.0
-    Q_other_states = 100.0
-    Q = np.diag([Q_first_state] + [Q_other_states] * (SystemConfig.STATE_DIM - 1))
+    # --- MPC TUNING: COST MATRICES ---
 
-    # Control cost: Penalize all control inputs equally.
-    R_val = 0.01
+    # Q: State Cost Matrix. How much do we care about tracking error?
+    # Penalize position error more than velocity error.
+    Q_pos = 100.0  # Penalty on position error (x0, x1, x2)
+    Q_vel = 1.0    # Lower penalty on velocity error (x3, x4, x5)
+    Q = np.diag([Q_pos, Q_pos, Q_pos, Q_vel, Q_vel, Q_vel])
+
+    # R: Control Cost Matrix. How much do we care about control effort?
+    # This is the most important parameter for stability.
+    # Start with a significantly higher value to prevent chattering.
+    R_val = 0.5  # INCREASED SIGNIFICANTLY (was 0.01 or 0.1)
     R = np.diag([R_val] * SystemConfig.CONTROL_DIM)
     
     # Control constraints
@@ -29,20 +35,21 @@ class MPCConfig:
 # --- Neural Network Configuration ---
 class NeuralNetConfig:
     INPUT_DIM = SystemConfig.STATE_DIM + SystemConfig.CONTROL_DIM
-    OUTPUT_DIM = SystemConfig.STATE_DIM
-    
-    HIDDEN_LAYERS = 3
-    HIDDEN_SIZE = 256
-    ACTIVATION = 'Tanh' # Options: 'ReLU', 'Tanh', 'Sigmoid'
+    # OUTPUT_DIM = SystemConfig.STATE_DIM // 2
+    OUTPUT_DIM = SystemConfig.STATE_DIM # For example training prediction is full x_dot
+    HIDDEN_LAYERS = 2
+    HIDDEN_SIZE = 128
+    ACTIVATION = 'Tanh'
 
 # --- Training Configuration ---
 class TrainingConfig:
     NUM_EPOCHS = 100
     BATCH_SIZE = 256
     LEARNING_RATE = 1e-3
-    
-    NUM_TRAIN_SAMPLES = 20000
-    NUM_VAL_SAMPLES = 2000
-
     REAL_DATASET_PATH = "model/data/output_exp_2025-07-22_12-23-07.csv"
     MODEL_SAVE_PATH = "model/data/trained_model.pth"
+    
+    # Example variables
+    EX_MODEL_SAVE_PATH = "model/data/example_model.pth"
+    NUM_TRAIN_SAMPLES = 10000
+    NUM_VAL_SAMPLES = 2000

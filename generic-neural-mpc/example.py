@@ -6,8 +6,8 @@ import os
 import shutil
 
 from config import SystemConfig, MPCConfig
-from system.system import GenericSystem
-from system.system_mpc import SystemMPC
+from system_x_dot.system import GenericSystem
+from system_x_dot.system_mpc import SystemMPC
 from utils.plotter import plot_results
 from model.train_example import true_system_dynamics_dt
 

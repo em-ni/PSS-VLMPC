@@ -4,7 +4,7 @@ import numpy as np
 
 from config import SystemConfig, TrainingConfig, MPCConfig
 from model.train_example import NeuralNetwork
-from system.system_optimizer import SystemOptimizer
+from system_x_dot.system_optimizer import SystemOptimizer
 
 class SystemMPC:
     def __init__(self):
@@ -12,7 +12,7 @@ class SystemMPC:
         print(f"SystemMPC is using device: {self.device}")
         
         # Load model and normalization stats
-        payload = torch.load(TrainingConfig.MODEL_SAVE_PATH, map_location=self.device)
+        payload = torch.load(TrainingConfig.EX_MODEL_SAVE_PATH, map_location=self.device)
         self.model = NeuralNetwork().to(self.device)
         self.model.load_state_dict(payload['state_dict'])
         self.model.eval()

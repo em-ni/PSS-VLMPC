@@ -141,9 +141,9 @@ def train():
                 'output_mean': output_mean,
                 'output_std': output_std,
             }
-            torch.save(save_payload, TrainingConfig.MODEL_SAVE_PATH)
-            print(f"Model saved to {TrainingConfig.MODEL_SAVE_PATH} with validation loss {avg_val_loss:.6f}")
+            torch.save(save_payload, TrainingConfig.EX_MODEL_SAVE_PATH)
+            print(f"Model saved to {TrainingConfig.EX_MODEL_SAVE_PATH} with validation loss {avg_val_loss:.6f}")
 
 if __name__ == '__main__':
-    os.makedirs(os.path.dirname(TrainingConfig.MODEL_SAVE_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(TrainingConfig.EX_MODEL_SAVE_PATH), exist_ok=True)
     train()
