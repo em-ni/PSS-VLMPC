@@ -6,6 +6,8 @@ import numpy as np
 class SystemConfig:
     STATE_DIM = 6
     CONTROL_DIM = 3
+    ACCEL_DIM = 3  # Assuming acceleration is part of the control input
+    FULL_INPUT_DIM = STATE_DIM + CONTROL_DIM + ACCEL_DIM  # Full input includes
 
 # --- MPC Configuration ---
 class MPCConfig:
@@ -47,7 +49,15 @@ class TrainingConfig:
     BATCH_SIZE = 256
     LEARNING_RATE = 1e-3
     REAL_DATASET_PATH = "model/data/output_exp_2025-07-22_12-23-07.csv"
-    MODEL_SAVE_PATH = "model/data/trained_model.pth"
+    MODEL_PATH = "model/data/trained_model.pth"
+    INPUT_SCALER_PATH = "model/data/input_scaler.joblib"
+    OUTPUT_SCALER_PATH = "model/data/output_scaler.joblib"
+    TEST_SIZE = 0.2
+    VAL_SIZE = 0.2
+    BATCH_SIZE = 32
+    NUM_EPOCHS = 100
+    LEARNING_RATE = 0.001
+    PLOT_OUTPUT_PATH = "model/data/prediction_performance_plot.png"
     
     # Example variables
     EX_MODEL_SAVE_PATH = "model/data/example_model.pth"
