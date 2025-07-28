@@ -11,3 +11,4 @@ Pressure.mat
 
 # Data
 data/exp_*/cam*
+generic-neural-mpc/data/*.pth
