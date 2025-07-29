@@ -15,8 +15,8 @@ def run_snake(b_coeff, SAVE_RESULTS=False):
 
     # setting up test params
     n_elem = 20
-    start = np.zeros((3,))
-    direction = np.array([0.0, 0.0, 1.0])
+    start = np.array([10.0, 0.0, 0.0])
+    direction = np.array([0.0, 0.0, -1.0])
     normal = np.array([0.0, 1.0, 0.0])
     base_length = 1.0
     base_radius = 0.025
