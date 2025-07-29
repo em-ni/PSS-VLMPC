@@ -25,7 +25,7 @@ from tqdm import tqdm
 from _povmacros import Stages, pyelastica_rod, render
 
 # Setup (USER DEFINE)
-DATA_PATH = "flexible_swinging_pendulum.dat"  # Path to the simulation data
+DATA_PATH = "results/rod1.dat"  # Path to the simulation data
 SAVE_PICKLE = True
 
 # Rendering Configuration (USER DEFINE)
@@ -51,33 +51,28 @@ if os.path.exists(OUTPUT_IMAGES_DIR):
 # Camera/Light Configuration (USER DEFINE)
 stages = Stages()
 stages.add_camera(
-    location=[2.0, 2.0, -4.0],
+    location=[1.0, 2.0, -2.0],
     angle=30,
-    look_at=[0.0, 0.0, 0.5],
-    name="diag",
-)
-stages.add_camera(
-    location=[0, 5, 0.5],
-    angle=30,
-    look_at=[0.0, 0.0, 0.5],
-    sky=[-1, 0, 0],
-    name="top",
+    look_at=[0.0, 1.0, 0.0],
+    name="diag"
 )
 stages.add_light(
     position=[1500, 2500, -1000],
     color="White",
-    camera_id=-1,
+    camera_id=-1
 )
 stages.add_light(
     position=[2.0, 2.0, -4.0],
     color=[0.09, 0.09, 0.1],
-    camera_id=0,
+    camera_id=0
 )
+
 stages.add_light(
     position=[0.0, 4.0, 1.0],
     color=[0.09, 0.09, 0.1],
     camera_id=1,
 )
+
 stage_scripts = stages.generate_scripts()
 
 # Externally Including Files (USER DEFINE)
@@ -118,29 +113,28 @@ if __name__ == "__main__":
 
     # Rendering
     batch = []
-    for view_name in stage_scripts.keys():
-        output_path = os.path.join(OUTPUT_IMAGES_DIR, view_name)
-        os.makedirs(output_path, exist_ok=True)
+    # Only process the 'diag' camera
+    view_name = "diag"
+    output_path = os.path.join(OUTPUT_IMAGES_DIR, view_name)
+    os.makedirs(output_path, exist_ok=True)
+    stage_script = stage_scripts[view_name]
     for frame_number in tqdm(range(total_frame), desc="Scripting"):
-        for view_name, stage_script in stage_scripts.items():
-            output_path = os.path.join(OUTPUT_IMAGES_DIR, view_name)
+        script = []
+        script.extend([f'#include "{s}"' for s in included])
+        script.append(stage_script)
 
-            script = []
-            script.extend([f'#include "{s}"' for s in included])
-            script.append(stage_script)
+        rod_object = pyelastica_rod(
+            x=xs[frame_number],
+            r=base_radius[frame_number],
+            color="rgb<0.2,0.6,0.8>",
+        )
+        script.append(rod_object)
+        pov_script = "\n".join(script)
 
-            rod_object = pyelastica_rod(
-                x=xs[frame_number],
-                r=base_radius[frame_number],
-                color="rgb<0.2,0.6,0.8>",
-            )
-            script.append(rod_object)
-            pov_script = "\n".join(script)
-
-            file_path = os.path.join(output_path, f"frame_{frame_number:04d}")
-            with open(file_path + ".pov", "w+") as f:
-                f.write(pov_script)
-            batch.append(file_path)
+        file_path = os.path.join(output_path, f"frame_{frame_number:04d}")
+        with open(file_path + ".pov", "w+") as f:
+            f.write(pov_script)
+        batch.append(file_path)
 
     # Process POVray
     pbar = tqdm(total=len(batch), desc="Rendering")
@@ -166,8 +160,7 @@ if __name__ == "__main__":
             )
             pbar.update()
 
-    # Create Video using ffmpeg
-    for view_name in stage_scripts.keys():
-        imageset_path = os.path.join(OUTPUT_IMAGES_DIR, view_name)
-        filename = OUTPUT_FILENAME + "_" + view_name + ".mp4"
-        os.system(f"ffmpeg -r {FPS} -i {imageset_path}/frame_%04d.png {filename}")
+    # Only save the diag video
+    imageset_path = os.path.join(OUTPUT_IMAGES_DIR, "diag")
+    filename = OUTPUT_FILENAME + "_diag.mp4"
+    os.system(f"ffmpeg -r {FPS} -i {imageset_path}/frame_%04d.png {filename}")
