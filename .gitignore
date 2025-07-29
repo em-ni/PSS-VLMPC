@@ -14,5 +14,6 @@ data/exp_*/cam*
 generic-neural-mpc/data/*.pth
 
 # sim
+sim/examples/frames
 sim/frames
 sim/*.mp4
