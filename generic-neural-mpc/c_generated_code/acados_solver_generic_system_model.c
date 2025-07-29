@@ -650,6 +650,8 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
 
 
 
+    /* Path constraints */
+
 
 
 
@@ -660,6 +662,9 @@ void generic_system_model_acados_setup_nlp_in(generic_system_model_solver_capsul
 
 
     /* terminal constraints */
+
+
+
 
 
 

@@ -19,7 +19,7 @@ class MPCConfig:
     REAL_DATASET_PATH = TrainConfig.REAL_DATASET_PATH
     N = 20
     DT = 0.022
-    SIM_TIME = 8.0
+    SIM_TIME = 10.0
     q_pos = 100.0
     q_vel = 0.0
     Q_diag = [q_pos, q_pos, q_pos, q_vel, q_vel, q_vel]
@@ -111,7 +111,13 @@ def run_mpc_simulation():
     for k in range(MPCConfig.N):
         opti.subject_to(opti.bounded(MPCConfig.U_MIN, U[:, k], MPCConfig.U_MAX))
     
-    solver_opts = {'ipopt.print_level': 0, 'print_time': 0, 'ipopt.sb': 'yes'}
+    solver_opts = {
+        'ipopt.print_level': 0, 
+        'print_time': 0, 
+        'ipopt.sb': 'yes',
+        # 'ipopt.tol': 1e-6,           # Relax the main tolerance (this fucks up things)
+        'ipopt.acceptable_tol': 1e-3   # Allow it to stop even sooner
+    }
     opti.solver('ipopt', solver_opts)
 
     # --- Phase 3: The Simulation Loop ---
@@ -126,6 +132,7 @@ def run_mpc_simulation():
     u_guess = np.zeros((n_controls, MPCConfig.N))
     last_u_optimal = np.zeros(n_controls)
     
+    sim_times = []
     start = time.time()
     for i in range(n_steps):
         # --- Step 3a: Prediction and Linearization (BATCHED) ---
@@ -163,18 +170,27 @@ def run_mpc_simulation():
             print(f"\nSolver failed at step {i}: {e}"); break
         
         # --- Step 3c: Simulate the System ---
+        start_sim = time.time()
         model_input_sim = np.concatenate([last_u_optimal, x_current, [MPCConfig.DT]])
         with torch.no_grad():
              x_current = full_pytorch_model(torch.from_numpy(model_input_sim).float()).numpy()
         history_x.append(x_current); history_u.append(last_u_optimal)
+        end_sim = time.time()
+        sim_times.append(end_sim - start_sim)
         
         if i % 10 == 0 or i == 0:
             dist_to_target = np.linalg.norm(x_current[:3] - x_target[:3])
             print(f"Step {i+1}/{n_steps}, Pos. Distance to target: {dist_to_target:.4f}")
     
     end = time.time()
-    print(f"\nSimulated {MPCConfig.SIM_TIME:.1f}s in {end - start:.2f} seconds. Avg time per step: {1000 * (end - start) / n_steps:.2f} ms.")
-            
+    total_sim_time = sum(sim_times)
+    mpc_time = end - start - total_sim_time
+    print(f"\nSimulated {MPCConfig.SIM_TIME:.1f}s in {end - start:.2f} seconds")
+    print(f"Total simulation time: {total_sim_time:.2f} seconds.")
+    print(f"Avg simulation time per step: {1000 * total_sim_time / n_steps:.2f} ms.")
+    print(f"Total MPC time: {mpc_time:.2f} seconds")
+    print(f"Avg MPC time per step: {1000 * mpc_time / n_steps:.2f} ms.")
+
     # --- Phase 4: Plotting ---
     history_x = np.array(history_x); history_u = np.array(history_u)
     fig, axs = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
@@ -188,7 +204,7 @@ def run_mpc_simulation():
         axs[2].step(time_axis_u, history_u[:, 0], where='post', label='Volume 1'); axs[2].step(time_axis_u, history_u[:, 1], where='post', label='Volume 2'); axs[2].step(time_axis_u, history_u[:, 2], where='post', label='Volume 3')
     axs[2].set_ylabel('Control Input'); axs[2].set_xlabel('Time (s)'); axs[2].set_title('MPC Control Inputs'); axs[2].legend(); axs[2].grid(True)
     plt.tight_layout()
-    plot_path = 'results/mpc_pure_python.png'
+    plot_path = 'results/mpc_casadi.png'
     plt.savefig(plot_path)
     print(f"\nMPC trajectory plot saved as '{plot_path}'.")
 
