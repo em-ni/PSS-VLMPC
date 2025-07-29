@@ -8,7 +8,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import matplotlib.pyplot as plt
 import joblib
-from train_robot import StatePredictor, load_and_prepare_data, TrainingConfig
+from train_robot import StatePredictor, load_and_prepare_data
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import TrainingConfig
 
 def plot_predictions(y_true, y_pred, save_path):
     """Generates Predicted vs. Actual plots and saves the figure to a file."""
