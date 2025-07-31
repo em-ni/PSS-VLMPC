@@ -30,7 +30,7 @@ DATA_PATH = "results"  # Path to the simulation data folder
 SAVE_PICKLE = True
 
 # Rendering Configuration (USER DEFINE)
-OUTPUT_FILENAME = "pov_cc_simulation"
+OUTPUT_FILENAME = "render"
 OUTPUT_IMAGES_DIR = "frames"
 FPS = 20.0
 WIDTH = 1920
