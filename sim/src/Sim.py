@@ -172,8 +172,8 @@ class Sim:
         
         self.cc_sim.add_forcing_to(self.rods[0]).using(
             ea.UniformTorques,
-            torque=self.max_torque,
-            direction=np.array([0, 1, 0])
+            torque=0,
+            direction=np.array([0, 0, 0])
         )
         
         self.cc_sim.dampen(self.rods[0]).using(
@@ -186,8 +186,8 @@ class Sim:
         if self.double_rod:
             self.cc_sim.add_forcing_to(self.rods[1]).using(
                 ea.UniformTorques,
-                torque=self.max_torque,
-                direction=np.array([0, 1, 0])
+                torque=0,
+                direction=np.array([0, 0, 0])
             )
             
             self.cc_sim.dampen(self.rods[1]).using(

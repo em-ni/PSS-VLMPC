@@ -6,42 +6,53 @@ import pickle
 import shutil
 from elastica.timestepper import tqdm
 from examples.MuscularSnake.post_processing import plot_video_with_surface
+import numpy as np
 
 # Local imports
 from src.RTPlotter import RTPlotter
 from src.Sim import Sim
+from utils.trajectories import build_trajectories, get_current_torques
 
 # Set path for FFMPEG for saving video animations
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 matplotlib.rcParams["animation.ffmpeg_path"] = ffmpeg_path
 matplotlib.use('Qt5Agg')  # Use interactive backend
 
+# Simulation settings
+SAVE_RESULTS = True
+SAVE_VIDEO = False
+REAL_TIME_PLOT = False
+N_TRAJECTORIES = 2
+TRAJECTORY_TIME = 10
+PAUSE_TIME = 5
+
+# rod parameters
+simulation_params = {
+    'n_elem': 30,
+    'base_length': 0.4,
+    'base_radius': 0.02,
+    'density': 500,
+    'youngs_modulus': 1e5,
+    'poisson_ratio': 0.5,
+    'damping_constant': 1e-1,
+    'dt': 1e-4,
+    'double_rod': True,
+    'max_torque': 9e-2,
+    'mpc_dt': 0.02
+}
+
+# Time parameters
+if N_TRAJECTORIES > 0:
+    final_time = N_TRAJECTORIES * (TRAJECTORY_TIME + PAUSE_TIME) + 1
+else:
+    final_time = 10
+plot_every_n_steps = 200
+
+
+
 
 def main():
-    # Simulation settings
-    SAVE_RESULTS = True
-    SAVE_VIDEO = True
-    REAL_TIME_PLOT = True
-    
-    # rod parameters
-    simulation_params = {
-        'n_elem': 30,
-        'base_length': 0.4,
-        'base_radius': 0.02,
-        'density': 1000,
-        'youngs_modulus': 1e5,
-        'poisson_ratio': 0.5,
-        'damping_constant': 1e-1,
-        'dt': 1e-4,
-        'double_rod': True,
-        'max_torque': 5e-2,
-        'mpc_dt': 0.02
-    }
-    
-    # Time parameters
-    final_time = 10
-    plot_every_n_steps = 200
-    
+
     # init sim
     print("Initializing Constant Curvature Simulation...")
     cc_sim = Sim(**simulation_params)
@@ -51,11 +62,28 @@ def main():
     torque_objects = cc_sim.get_torque_objects()
     callback_params = cc_sim.get_callback_params()
     
+    # Build trajectories by sampling random torques
+    trajectories = []
+    if N_TRAJECTORIES > 0:
+        trajectories = build_trajectories(
+            N_TRAJECTORIES, 
+            TRAJECTORY_TIME, 
+            simulation_params['max_torque'],
+            PAUSE_TIME
+        )
+    
     # Print simulation info
     sim_info = cc_sim.get_simulation_info()
     print("Simulation Configuration:")
     for key, value in sim_info.items():
         print(f"  {key}: {value}")
+        
+    if trajectories:
+        print(f"\nTrajectory Execution Plan:")
+        print(f"  Total trajectories: {len(trajectories)}")
+        print(f"  Trajectory duration: {TRAJECTORY_TIME}s")
+        print(f"  Pause between trajectories: {PAUSE_TIME}s")
+        print(f"  Total simulation time: {final_time}s")
     
     # Set real-time plot
     plotter = None
@@ -71,34 +99,46 @@ def main():
         print("Close the plot window to stop the simulation")
     
     time = 0.0
-    
+    current_trajectory = -1
     try:
         # main loop
         for i in tqdm(range(total_steps)):
             current_time = i * simulation_params['dt']
             
-            # =================================================================
-            # DYNAMIC TORQUE CONTROL (Optional)
-            # =================================================================
-            # Uncomment and modify as needed for dynamic control
-            
-            # Example: Time-based torque control
-            # if current_time < 2.0:
-            #     cc_sim.set_torque(0, np.array([0.0, -2e-2, 0.0]))  # Rod 1
-            #     if len(torque_objects) > 1:
-            #         cc_sim.set_torque(1, np.array([0.0, 7e-3, 0.0]))  # Rod 2
-            # elif current_time < 5.0:
-            #     cc_sim.set_torque(0, np.array([0.0, -5e-2, 0.0]))
-            #     if len(torque_objects) > 1:
-            #         cc_sim.set_torque(1, np.array([0.0, 1e-2, 0.0]))
-            # elif current_time < 8.0:
-            #     cc_sim.set_torque(0, np.array([0.0, 3e-2, 0.0]))
-            #     if len(torque_objects) > 1:
-            #         cc_sim.set_torque(1, np.array([0.0, -8e-3, 0.0]))
-            # else:
-            #     cc_sim.set_torque(0, np.array([0.0, 0.0, 0.0]))
-            #     if len(torque_objects) > 1:
-            #         cc_sim.set_torque(1, np.array([0.0, 0.0, 0.0]))
+            # Warm up for 0.5 s
+            if current_time < 0.5:
+                cc_sim.set_torque(0, np.array([0.0, 0.0, 0.0])) 
+                cc_sim.set_torque(1, np.array([0.0, 0.0, 0.0]))  
+            else:
+                # Execute trajectories
+                if trajectories:
+                    # Determine which trajectory we're in
+                    trajectory_cycle_time = TRAJECTORY_TIME + PAUSE_TIME
+                    new_trajectory_idx = int((current_time - 0.5) // trajectory_cycle_time)
+                    
+                    # Print trajectory transitions
+                    if new_trajectory_idx != current_trajectory and new_trajectory_idx < len(trajectories):
+                        current_trajectory = new_trajectory_idx
+                        cycle_time = (current_time - 0.5) % trajectory_cycle_time
+                        if cycle_time < TRAJECTORY_TIME:
+                            print(f"\nStarting trajectory {current_trajectory + 1} at time {current_time:.2f}s")
+                        else:
+                            print(f"\nPause period after trajectory {current_trajectory + 1} at time {current_time:.2f}s")
+                    
+                    # Get current torques based on trajectory execution
+                    rod1_torque, rod2_torque = get_current_torques(
+                        trajectories, 
+                        current_time - 0.5,  # Subtract warm-up time
+                        TRAJECTORY_TIME,
+                        PAUSE_TIME
+                    )
+                    
+                    cc_sim.set_torque(0, rod1_torque)
+                    cc_sim.set_torque(1, rod2_torque)
+                else:
+                    # No trajectories defined, use zero torques
+                    cc_sim.set_torque(0, np.array([0.0, 0.0, 0.0])) 
+                    cc_sim.set_torque(1, np.array([0.0, 0.0, 0.0]))
             
             # step sim
             time = cc_sim.step(time)
