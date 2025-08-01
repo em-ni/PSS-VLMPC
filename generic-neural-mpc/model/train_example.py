@@ -6,7 +6,40 @@ import numpy as np
 from tqdm import tqdm
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import SystemConfig, NeuralNetConfig, TrainingConfig
+
+# --- System Configuration ---
+class SystemConfig:
+    STATE_DIM = 6
+    CONTROL_DIM = 3
+    ACCEL_DIM = 3  # Assuming acceleration is part of the control input
+    FULL_INPUT_DIM = STATE_DIM + CONTROL_DIM + ACCEL_DIM  # Full input includes
+    
+
+# --- Neural Network Configuration ---
+class NeuralNetConfig:
+    INPUT_DIM = SystemConfig.STATE_DIM + SystemConfig.CONTROL_DIM
+    # OUTPUT_DIM = SystemConfig.STATE_DIM // 2
+    OUTPUT_DIM = SystemConfig.STATE_DIM # For example training prediction is full x_dot
+    HIDDEN_LAYERS = 2
+    HIDDEN_SIZE = 128
+    ACTIVATION = 'Tanh'
+
+# --- Training Configuration ---
+class TrainingConfig:
+    NUM_EPOCHS = 100
+    BATCH_SIZE = 256
+    LEARNING_RATE = 1e-3
+    TEST_SIZE = 0.2
+    VAL_SIZE = 0.2
+    BATCH_SIZE = 32
+    NUM_EPOCHS = 100
+    LEARNING_RATE = 0.001
+    PLOT_OUTPUT_PATH = "model/data/prediction_performance_plot.png"
+    
+    # Example variables
+    EX_MODEL_SAVE_PATH = "model/data/example_model.pth"
+    NUM_TRAIN_SAMPLES = 10000
+    NUM_VAL_SAMPLES = 2000
 
 def true_system_dynamics_dt(x, u):
     """

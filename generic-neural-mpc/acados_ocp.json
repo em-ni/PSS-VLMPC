@@ -716,7 +716,7 @@
         "zu_e": []
     },
     "cython_include_dirs": [
-        "/home/z5440219/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/_core/include",
+        "/home/z5440219/github/sorolearn/generic-neural-mpc/env/lib/python3.9/site-packages/numpy/core/include",
         "/usr/include/python3.9"
     ],
     "dims": {

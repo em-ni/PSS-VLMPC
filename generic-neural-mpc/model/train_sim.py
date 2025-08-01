@@ -12,67 +12,87 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # --- Training Configuration ---
 class TrainingConfig:
-    NUM_EPOCHS = 100
-    BATCH_SIZE = 256
-    LEARNING_RATE = 1e-3
-    REAL_DATASET_PATH = "model/data/output_exp_2025-07-22_12-23-07.csv"
-    MODEL_PATH = "model/data/real_rob_f.pth"
-    INPUT_SCALER_PATH = "model/data/real_rob_i_scaler.joblib"
-    OUTPUT_SCALER_PATH = "model/data/real_rob_o_scaler.joblib"
+    # --- IMPORTANT: Update this path to your new CSV file ---
+    REAL_DATASET_PATH = "model/data/sim_dataset.csv" 
+    
+    # --- Output file paths for the new model ---
+    MODEL_PATH = "model/data/sim_rob_f.pth"
+    INPUT_SCALER_PATH = "model/data/sim_rob_i_scaler.joblib"
+    OUTPUT_SCALER_PATH = "model/data/sim_rob_o_scaler.joblib"
+    PLOT_OUTPUT_PATH = "model/data/sim_rob_perf.png"
+
+    # --- Training Hyperparameters ---
     TEST_SIZE = 0.2
-    VAL_SIZE = 0.2
-    BATCH_SIZE = 32
+    VAL_SIZE = 0.2  # This is 20% of the *original* dataset, so 25% of the training set
+    BATCH_SIZE = 256
     NUM_EPOCHS = 100
     LEARNING_RATE = 0.001
-    PLOT_OUTPUT_PATH = "model/data/real_rob_perf.png"
+    RANDOM_STATE = 42 # for reproducibility
 
 
 def load_and_prepare_data(filepath):
     """
-    Loads data, calculates dt, and creates pairs where X = [u_k, x_k, dt]
-    and y = [x_k+1]. Acceleration is EXCLUDED from inputs.
+    Loads data from a single continuous trajectory CSV.
+    Calculates dt and creates pairs where:
+      X = [torques_k, state_k, dt]
+      y = [state_k+1]
+    
+    The input CSV format is assumed to be:
+    T,rod1_torque_x,rod1_torque_y,rod2_torque_x,rod2_torque_y,tip_position_x,tip_position_y,tip_position_z,tip_velocity_x,tip_velocity_y,tip_velocity_z
     """
     print(f"Loading data from {filepath}...")
     df = pd.read_csv(filepath)
-    df.columns = df.columns.str.strip().str.replace(' \(.*\)', '', regex=True)
+    # Clean up column names (remove whitespace)
+    df.columns = df.columns.str.strip()
 
-    STATE_COLS = ['tip_x', 'tip_y', 'tip_z', 'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z']
-    INPUT_COLS = ['volume_1', 'volume_2', 'volume_3']
+    # Define the columns for state (what we predict) and control inputs (what we command)
+    STATE_COLS = [
+        'tip_position_x', 'tip_position_y', 'tip_position_z',
+        'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z'
+    ]
+    INPUT_COLS = [
+        'rod1_torque_x', 'rod1_torque_y',
+        'rod2_torque_x', 'rod2_torque_y'
+    ]
     
-    # --- KEY CHANGE: ACCELERATION IS NO LONGER AN INPUT ---
+    # These are all the features that describe the system at step 'k'
     CURRENT_FEATURES = INPUT_COLS + STATE_COLS
     
-    df.dropna(subset=CURRENT_FEATURES + ['T'], inplace=True)
+    # Ensure all required columns exist and drop rows with any missing values
+    all_required_cols = ['T'] + CURRENT_FEATURES
+    for col in all_required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Required column '{col}' not found in the CSV file.")
+    
+    df.dropna(subset=all_required_cols, inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    X_list, y_list = [], []
+    if len(df) < 2:
+        raise ValueError("Not enough data to create training pairs (must have at least 2 rows).")
+
+    print("Processing data as a single continuous trajectory...")
     
-    print("Processing trajectories (without acceleration)...")
-    for traj_id, group in df.groupby('trajectory'):
-        if len(group) < 2:
-            continue
-            
-        current_features = group[CURRENT_FEATURES].iloc[:-1].values
-        next_state = group[STATE_COLS].iloc[1:].values
-        
-        times_ms = group['T'].values
-        dt_seconds = (times_ms[1:] - times_ms[:-1]) / 1000.0
-        dt_seconds_col = dt_seconds.reshape(-1, 1)
-        
-        # X = [u_k, x_k, dt]
-        X_with_dt = np.hstack([current_features, dt_seconds_col])
-        
-        X_list.append(X_with_dt)
-        y_list.append(next_state)
-
-    if not X_list:
-        raise ValueError("Not enough data to create training pairs.")
-
-    X = np.vstack(X_list)
-    y = np.vstack(y_list)
+    # Get features for the current time step 'k' (all rows except the last one)
+    current_features = df[CURRENT_FEATURES].iloc[:-1].values
+    
+    # Get the target state for the next time step 'k+1' (all rows except the first one)
+    next_state = df[STATE_COLS].iloc[1:].values
+    
+    # Calculate dt in seconds from the 'T' column (assuming T is in milliseconds)
+    times_ms = df['T'].values
+    dt_seconds = (times_ms[1:] - times_ms[:-1]) / 1000.0
+    dt_seconds_col = dt_seconds.reshape(-1, 1) # Reshape for horizontal stacking
+    
+    # Assemble the final input matrix X = [inputs_k, state_k, dt]
+    # np.hstack horizontally stacks the arrays
+    X = np.hstack([current_features, dt_seconds_col])
+    
+    # The output matrix y is simply the next state
+    y = next_state
     
     print("Finished processing data.")
     return X, y
+
 class RobotStateDataset(Dataset):
     """Custom PyTorch Dataset."""
     def __init__(self, X, y):
@@ -102,26 +122,6 @@ class StatePredictor(nn.Module):
     
     def forward(self, x):
         return self.network(x)
-    
-# This bigger model is more precise but the mpc has slower convergence
-"""A bigger, more precise neural network can paradoxically lead to slower MPC convergence because its complexity creates a "jagged" and non-smooth function landscape. The MPC relies on linear approximations (the tangent slope) at each step to find the next best move. On a smooth landscape, these approximations are accurate over a large area, allowing the optimizer to take confident, large steps and converge quickly. On the jagged landscape of the bigger model, the linear approximation is only valid for a tiny, immediate area. This forces the optimizer to take very small, cautious steps and run many more iterations, dramatically slowing down the process. Essentially, for this type of optimization, the smoothness of the model is more important than its absolute precision, and the simpler model provides a much smoother, more navigable landscape for the controller to work with.
-"""
-# class StatePredictor(nn.Module):
-#     """A simple feed-forward neural network for state prediction."""
-#     def __init__(self, input_dim, output_dim):
-#         super(StatePredictor, self).__init__()
-#         self.network = nn.Sequential(
-#             nn.Linear(input_dim, 128),
-#             nn.ReLU(),
-#             nn.Linear(128, 256),
-#             nn.ReLU(),
-#             nn.Linear(256, 128),
-#             nn.ReLU(),
-#             nn.Linear(128, output_dim)
-#         )
-    
-#     def forward(self, x):
-#         return self.network(x)
 
 def train_model(model, train_loader, val_loader, num_epochs, learning_rate, device):
     """The main training loop."""
@@ -180,9 +180,6 @@ if __name__ == "__main__":
 
     # --- Create Data and Load ---
     try:
-        # NOTE: You need to have your CSV file at the path specified in TrainingConfig
-        # For this example, create a dummy file if you don't have the real one yet.
-        # e.g., with open(TrainingConfig.REAL_DATASET_PATH, 'w') as f: f.write("...")
         X, y = load_and_prepare_data(TrainingConfig.REAL_DATASET_PATH)
     except FileNotFoundError:
         print(f"Error: The data file was not found at {TrainingConfig.REAL_DATASET_PATH}")
@@ -197,11 +194,17 @@ if __name__ == "__main__":
     
     # --- Split Data (using a fixed random_state is crucial for reproducibility) ---
     X_train_val, X_test, y_train_val, y_test = train_test_split(
-        X, y, test_size=TrainingConfig.TEST_SIZE, random_state=42
+        X, y, test_size=TrainingConfig.TEST_SIZE, random_state=TrainingConfig.RANDOM_STATE
     )
+    # Adjust validation split size based on the remaining data
+    val_split_ratio = TrainingConfig.VAL_SIZE / (1 - TrainingConfig.TEST_SIZE)
     X_train, X_val, y_train, y_val = train_test_split(
-        X_train_val, y_train_val, test_size=TrainingConfig.VAL_SIZE / (1 - TrainingConfig.TEST_SIZE), random_state=42
+        X_train_val, y_train_val, test_size=val_split_ratio, random_state=TrainingConfig.RANDOM_STATE
     )
+    print(f"\nData split:")
+    print(f"  Training set size:   {X_train.shape[0]}")
+    print(f"  Validation set size: {X_val.shape[0]}")
+    print(f"  Test set size:       {X_test.shape[0]}")
 
     # --- Scale Data ---
     print("\nScaling data...")
@@ -226,7 +229,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nUsing device: {device}")
     
-    # The input dimension is now automatically inferred from the data, including dt
+    # The input and output dimensions are automatically inferred from the data shape
     input_dim = X_train.shape[1]
     output_dim = y_train.shape[1]
     model = StatePredictor(input_dim, output_dim)

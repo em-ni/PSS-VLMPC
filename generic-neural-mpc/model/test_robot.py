@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import joblib
 from train_robot import StatePredictor, load_and_prepare_data
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import TrainingConfig
+from train_robot import TrainingConfig
 
 def plot_predictions(y_true, y_pred, save_path):
     """Generates Predicted vs. Actual plots and saves the figure to a file."""
