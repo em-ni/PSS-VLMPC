@@ -21,7 +21,6 @@ class TrainingConfig:
     PLOT_OUTPUT_PATH = "model/data/real_rob_perf.png"
     
     NUM_EPOCHS = 100
-    BATCH_SIZE = 256
     TEST_SIZE = 0.2
     VAL_SIZE = 0.2
     BATCH_SIZE = 32

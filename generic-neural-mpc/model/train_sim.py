@@ -19,12 +19,12 @@ class TrainingConfig:
     OUTPUT_SCALER_PATH = "model/data/sim_rob_o_scaler.joblib"
     PLOT_OUTPUT_PATH = "model/data/sim_rob_perf.png"
     
-    NUM_EPOCHS = 200
+    NUM_EPOCHS = 50
     BATCH_SIZE = 256
     TEST_SIZE = 0.2
     VAL_SIZE = 0.2
-    BATCH_SIZE = 32
-    LEARNING_RATE = 5e-4
+    LEARNING_RATE = 1e-3
+    WEIGHT_DECAY = 1e-5
 
 
 def load_and_prepare_data(filepath):
@@ -103,21 +103,17 @@ class RobotStateDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 class StatePredictor(nn.Module):
-    """A larger feed-forward neural network for state prediction on large simulation datasets."""
+    """A right-sized neural network for state prediction."""
     def __init__(self, input_dim, output_dim):
         super(StatePredictor, self).__init__()
         self.network = nn.Sequential(
-            nn.Linear(input_dim, 256),
+            nn.Linear(input_dim, 128),
             nn.ReLU(),
-            nn.Linear(256, 512),
+            nn.Linear(128, 256),
             nn.ReLU(),
-            nn.Linear(512, 1024),
+            nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(1024, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Linear(256, output_dim)
+            nn.Linear(128, output_dim)
         )
     
     def forward(self, x):
@@ -126,7 +122,7 @@ class StatePredictor(nn.Module):
 def train_model(model, train_loader, val_loader, num_epochs, learning_rate, device):
     """The main training loop."""
     criterion = nn.MSELoss()  # Mean Squared Error is good for regression
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
     
     model.to(device)
     
