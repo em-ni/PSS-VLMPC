@@ -102,6 +102,7 @@ def main():
         for i in tqdm(range(total_steps)):
             current_time = i * simulation_params['dt']
             
+            # --- control for data collection ---
             # Warm up for 0.5 s
             if current_time < 0.5:
                 cc_sim.set_torque(0, np.array([0.0, 0.0, 0.0])) 
@@ -134,6 +135,7 @@ def main():
                     # No trajectories defined, use zero torques
                     cc_sim.set_torque(0, np.array([0.0, 0.0, 0.0])) 
                     cc_sim.set_torque(1, np.array([0.0, 0.0, 0.0]))
+            # --- end data collection ---
             
             # step sim
             time = cc_sim.step(time)

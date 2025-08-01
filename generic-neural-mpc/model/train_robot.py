@@ -1,3 +1,4 @@
+# train_robot.py
 import os
 import sys
 import pandas as pd
@@ -12,25 +13,26 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # --- Training Configuration ---
 class TrainingConfig:
-    NUM_EPOCHS = 100
-    BATCH_SIZE = 256
-    LEARNING_RATE = 1e-3
+    
     REAL_DATASET_PATH = "model/data/output_exp_2025-07-22_12-23-07.csv"
     MODEL_PATH = "model/data/real_rob_f.pth"
     INPUT_SCALER_PATH = "model/data/real_rob_i_scaler.joblib"
     OUTPUT_SCALER_PATH = "model/data/real_rob_o_scaler.joblib"
+    PLOT_OUTPUT_PATH = "model/data/real_rob_perf.png"
+    
+    NUM_EPOCHS = 100
+    BATCH_SIZE = 256
     TEST_SIZE = 0.2
     VAL_SIZE = 0.2
     BATCH_SIZE = 32
-    NUM_EPOCHS = 100
     LEARNING_RATE = 0.001
-    PLOT_OUTPUT_PATH = "model/data/real_rob_perf.png"
 
 
 def load_and_prepare_data(filepath):
     """
     Loads data, calculates dt, and creates pairs where X = [u_k, x_k, dt]
-    and y = [x_k+1]. Acceleration is EXCLUDED from inputs.
+    x_k = ['tip_x', 'tip_y', 'tip_z', 'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z']
+    y = [x_k+1].
     """
     print(f"Loading data from {filepath}...")
     df = pd.read_csv(filepath)
@@ -38,8 +40,6 @@ def load_and_prepare_data(filepath):
 
     STATE_COLS = ['tip_x', 'tip_y', 'tip_z', 'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z']
     INPUT_COLS = ['volume_1', 'volume_2', 'volume_3']
-    
-    # --- KEY CHANGE: ACCELERATION IS NO LONGER AN INPUT ---
     CURRENT_FEATURES = INPUT_COLS + STATE_COLS
     
     df.dropna(subset=CURRENT_FEATURES + ['T'], inplace=True)
@@ -180,9 +180,6 @@ if __name__ == "__main__":
 
     # --- Create Data and Load ---
     try:
-        # NOTE: You need to have your CSV file at the path specified in TrainingConfig
-        # For this example, create a dummy file if you don't have the real one yet.
-        # e.g., with open(TrainingConfig.REAL_DATASET_PATH, 'w') as f: f.write("...")
         X, y = load_and_prepare_data(TrainingConfig.REAL_DATASET_PATH)
     except FileNotFoundError:
         print(f"Error: The data file was not found at {TrainingConfig.REAL_DATASET_PATH}")

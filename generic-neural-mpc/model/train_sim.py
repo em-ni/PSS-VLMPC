@@ -1,3 +1,4 @@
+# train_sim.py
 import os
 import sys
 import pandas as pd
@@ -12,22 +13,18 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # --- Training Configuration ---
 class TrainingConfig:
-    # --- IMPORTANT: Update this path to your new CSV file ---
-    REAL_DATASET_PATH = "model/data/sim_dataset.csv" 
-    
-    # --- Output file paths for the new model ---
+    SIM_DATASET_PATH = "../sim/results/sim_dataset.csv" 
     MODEL_PATH = "model/data/sim_rob_f.pth"
     INPUT_SCALER_PATH = "model/data/sim_rob_i_scaler.joblib"
     OUTPUT_SCALER_PATH = "model/data/sim_rob_o_scaler.joblib"
     PLOT_OUTPUT_PATH = "model/data/sim_rob_perf.png"
-
-    # --- Training Hyperparameters ---
-    TEST_SIZE = 0.2
-    VAL_SIZE = 0.2  # This is 20% of the *original* dataset, so 25% of the training set
+    
+    NUM_EPOCHS = 200
     BATCH_SIZE = 256
-    NUM_EPOCHS = 100
-    LEARNING_RATE = 0.001
-    RANDOM_STATE = 42 # for reproducibility
+    TEST_SIZE = 0.2
+    VAL_SIZE = 0.2
+    BATCH_SIZE = 32
+    LEARNING_RATE = 5e-4
 
 
 def load_and_prepare_data(filepath):
@@ -78,13 +75,12 @@ def load_and_prepare_data(filepath):
     # Get the target state for the next time step 'k+1' (all rows except the first one)
     next_state = df[STATE_COLS].iloc[1:].values
     
-    # Calculate dt in seconds from the 'T' column (assuming T is in milliseconds)
+    # Calculate dt
     times_ms = df['T'].values
-    dt_seconds = (times_ms[1:] - times_ms[:-1]) / 1000.0
+    dt_seconds = (times_ms[1:] - times_ms[:-1])
     dt_seconds_col = dt_seconds.reshape(-1, 1) # Reshape for horizontal stacking
     
-    # Assemble the final input matrix X = [inputs_k, state_k, dt]
-    # np.hstack horizontally stacks the arrays
+    # Assemble the final input matrix # X = [u_k, x_k, dt]
     X = np.hstack([current_features, dt_seconds_col])
     
     # The output matrix y is simply the next state
@@ -107,17 +103,21 @@ class RobotStateDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 class StatePredictor(nn.Module):
-    """A simple feed-forward neural network for state prediction."""
+    """A larger feed-forward neural network for state prediction on large simulation datasets."""
     def __init__(self, input_dim, output_dim):
         super(StatePredictor, self).__init__()
         self.network = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 256),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(256, 512),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(512, 1024),
             nn.ReLU(),
-            nn.Linear(128, output_dim)
+            nn.Linear(1024, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, output_dim)
         )
     
     def forward(self, x):
@@ -180,9 +180,9 @@ if __name__ == "__main__":
 
     # --- Create Data and Load ---
     try:
-        X, y = load_and_prepare_data(TrainingConfig.REAL_DATASET_PATH)
+        X, y = load_and_prepare_data(TrainingConfig.SIM_DATASET_PATH)
     except FileNotFoundError:
-        print(f"Error: The data file was not found at {TrainingConfig.REAL_DATASET_PATH}")
+        print(f"Error: The data file was not found at {TrainingConfig.SIM_DATASET_PATH}")
         print("Please create the file or update the path in the TrainingConfig class.")
         sys.exit()
     except (KeyError, ValueError) as e:
@@ -194,17 +194,13 @@ if __name__ == "__main__":
     
     # --- Split Data (using a fixed random_state is crucial for reproducibility) ---
     X_train_val, X_test, y_train_val, y_test = train_test_split(
-        X, y, test_size=TrainingConfig.TEST_SIZE, random_state=TrainingConfig.RANDOM_STATE
+        X, y, test_size=TrainingConfig.TEST_SIZE, random_state=42
     )
     # Adjust validation split size based on the remaining data
     val_split_ratio = TrainingConfig.VAL_SIZE / (1 - TrainingConfig.TEST_SIZE)
     X_train, X_val, y_train, y_val = train_test_split(
-        X_train_val, y_train_val, test_size=val_split_ratio, random_state=TrainingConfig.RANDOM_STATE
+        X_train_val, y_train_val, test_size=val_split_ratio, random_state=42
     )
-    print(f"\nData split:")
-    print(f"  Training set size:   {X_train.shape[0]}")
-    print(f"  Validation set size: {X_val.shape[0]}")
-    print(f"  Test set size:       {X_test.shape[0]}")
 
     # --- Scale Data ---
     print("\nScaling data...")

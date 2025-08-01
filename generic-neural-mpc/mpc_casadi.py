@@ -1,3 +1,4 @@
+# mpc_casadi.py
 import sys
 import time
 import pandas as pd
@@ -72,13 +73,16 @@ def run_mpc_simulation():
     # --- Phase 1: Initialization ---
     print("--- Loading 'no acceleration' assets ---")
     try:
-        df = pd.read_csv(MPCConfig.REAL_DATASET_PATH); df.columns = df.columns.str.strip().str.replace(' \(.*\)', '', regex=True)
-        model = StatePredictor(input_dim=10, output_dim=6); model.load_state_dict(torch.load(MPCConfig.MODEL_PATH))
+        df = pd.read_csv(MPCConfig.REAL_DATASET_PATH); 
+        df.columns = df.columns.str.strip().str.replace(' \(.*\)', '', regex=True)
+        model = StatePredictor(input_dim=10, output_dim=6)
+        model.load_state_dict(torch.load(MPCConfig.MODEL_PATH))
         # --- JIT Compile the model for extra speed ---
         dummy_input = torch.randn(1, 10) # 1 sample, 10 features
         model = torch.jit.trace(model, dummy_input)
         print("Model JIT-compiled with TorchScript.")
-        input_scaler = joblib.load(MPCConfig.INPUT_SCALER_PATH); output_scaler = joblib.load(MPCConfig.OUTPUT_SCALER_PATH)
+        input_scaler = joblib.load(MPCConfig.INPUT_SCALER_PATH)
+        output_scaler = joblib.load(MPCConfig.OUTPUT_SCALER_PATH)
     except FileNotFoundError as e: print(f"Error: A required file was not found: {e.filename}"); sys.exit()
 
     # --- Phase 2: Define the Optimization Problem (OCP) ---
@@ -86,15 +90,19 @@ def run_mpc_simulation():
     opti = ca.Opti()
     n_states, n_controls = 6, 3
     
-    X = opti.variable(n_states, MPCConfig.N + 1); U = opti.variable(n_controls, MPCConfig.N)
-    x0 = opti.parameter(n_states, 1); x_ref = opti.parameter(n_states, 1); u_prev = opti.parameter(n_controls, 1)
+    X = opti.variable(n_states, MPCConfig.N + 1); 
+    U = opti.variable(n_controls, MPCConfig.N)
+    x0 = opti.parameter(n_states, 1)
+    x_ref = opti.parameter(n_states, 1); u_prev = opti.parameter(n_controls, 1)
     
     A_params = [opti.parameter(n_states, n_states) for _ in range(MPCConfig.N)]
     B_params = [opti.parameter(n_states, n_controls) for _ in range(MPCConfig.N)]
     C_params = [opti.parameter(n_states, 1) for _ in range(MPCConfig.N)]
 
     cost = 0
-    Q = ca.diag(MPCConfig.Q_diag); R = ca.diag(MPCConfig.R_diag); R_rate = ca.diag(MPCConfig.R_rate_diag)
+    Q = ca.diag(MPCConfig.Q_diag)
+    R = ca.diag(MPCConfig.R_diag)
+    R_rate = ca.diag(MPCConfig.R_rate_diag)
     
     for k in range(MPCConfig.N):
         cost += (X[:, k] - x_ref).T @ Q @ (X[:, k] - x_ref)
@@ -124,7 +132,8 @@ def run_mpc_simulation():
     print("--- Starting MPC simulation ---")
     state_cols = ['tip_x', 'tip_y', 'tip_z', 'tip_velocity_x', 'tip_velocity_y', 'tip_velocity_z']
     sample = df[state_cols].dropna().sample(2, random_state=42)
-    x_current = sample.iloc[0].values; x_target = sample.iloc[1].values
+    x_current = sample.iloc[0].values
+    x_target = sample.iloc[1].values
     
     history_x, history_u = [x_current], []
     n_steps = int(MPCConfig.SIM_TIME / MPCConfig.DT)
@@ -153,19 +162,26 @@ def run_mpc_simulation():
         # Set the parameters for the optimizer in a simple loop
         for k in range(MPCConfig.N):
             J_k = J_batch[k]
-            B_k = J_k[:, :n_controls]; A_k = J_k[:, n_controls:n_controls+n_states]
+            B_k = J_k[:, :n_controls]
+            A_k = J_k[:, n_controls:n_controls+n_states]
             C_k = y_pred_batch[k] - A_k @ x_guess_np[k] - B_k @ u_guess[:, k]
-            opti.set_value(A_params[k], A_k); opti.set_value(B_params[k], B_k); opti.set_value(C_params[k], C_k.reshape(-1, 1))
+            opti.set_value(A_params[k], A_k)
+            opti.set_value(B_params[k], B_k)
+            opti.set_value(C_params[k], C_k.reshape(-1, 1))
         
         # --- Step 3b: Set Current Values and Solve ---
-        opti.set_value(x0, x_current); opti.set_value(x_ref, x_target); opti.set_value(u_prev, last_u_optimal)
-        opti.set_initial(U, u_guess); opti.set_initial(X, np.hstack([x_current.reshape(-1,1), x_guess_np.T]))
+        opti.set_value(x0, x_current)
+        opti.set_value(x_ref, x_target)
+        opti.set_value(u_prev, last_u_optimal)
+        opti.set_initial(U, u_guess)
+        opti.set_initial(X, np.hstack([x_current.reshape(-1,1), x_guess_np.T]))
 
         try:
             sol = opti.solve()
             u_optimal_all = sol.value(U)
             last_u_optimal = u_optimal_all[:, 0]
-            u_guess = np.roll(u_optimal_all, -1, axis=1); u_guess[:, -1] = last_u_optimal
+            u_guess = np.roll(u_optimal_all, -1, axis=1)
+            u_guess[:, -1] = last_u_optimal
         except Exception as e:
             print(f"\nSolver failed at step {i}: {e}"); break
         
@@ -174,7 +190,8 @@ def run_mpc_simulation():
         model_input_sim = np.concatenate([last_u_optimal, x_current, [MPCConfig.DT]])
         with torch.no_grad():
              x_current = full_pytorch_model(torch.from_numpy(model_input_sim).float()).numpy()
-        history_x.append(x_current); history_u.append(last_u_optimal)
+        history_x.append(x_current)
+        history_u.append(last_u_optimal)
         end_sim = time.time()
         sim_times.append(end_sim - start_sim)
         
@@ -192,17 +209,30 @@ def run_mpc_simulation():
     print(f"Avg MPC time per step: {1000 * mpc_time / n_steps:.2f} ms.")
 
     # --- Phase 4: Plotting ---
-    history_x = np.array(history_x); history_u = np.array(history_u)
+    history_x = np.array(history_x)
+    history_u = np.array(history_u)
     fig, axs = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
     time_axis = np.arange(history_x.shape[0]) * MPCConfig.DT
-    axs[0].plot(time_axis, history_x[:, 0], label='Tip X'); axs[0].plot(time_axis, history_x[:, 1], label='Tip Y'); axs[0].plot(time_axis, history_x[:, 2], label='Tip Z')
-    axs[0].axhline(y=x_target[0], color='r', linestyle='--', label='Target X'); axs[0].axhline(y=x_target[1], color='g', linestyle='--', label='Target Y'); axs[0].axhline(y=x_target[2], color='b', linestyle='--', label='Target Z')
-    axs[0].set_ylabel('Position (cm)'); axs[0].set_title('MPC Trajectory (Batched Linearization)'); axs[0].legend(); axs[0].grid(True)
-    axs[1].plot(time_axis, history_x[:, 3:6]); axs[1].axhline(y=0, color='k', linestyle='--'); axs[1].set_ylabel('Velocity (cm/s)'); axs[1].grid(True)
+    axs[0].plot(time_axis, history_x[:, 0], label='Tip X')
+    axs[0].plot(time_axis, history_x[:, 1], label='Tip Y')
+    axs[0].plot(time_axis, history_x[:, 2], label='Tip Z')
+    axs[0].axhline(y=x_target[0], color='r', linestyle='--', label='Target X')
+    axs[0].axhline(y=x_target[1], color='g', linestyle='--', label='Target Y')
+    axs[0].axhline(y=x_target[2], color='b', linestyle='--', label='Target Z')
+    axs[0].set_ylabel('Position (cm)')
+    axs[0].set_title('MPC Trajectory (Batched Linearization)')
+    axs[0].legend(); axs[0].grid(True)
+    axs[1].plot(time_axis, history_x[:, 3:6])
+    axs[1].axhline(y=0, color='k', linestyle='--')
+    axs[1].set_ylabel('Velocity (cm/s)'); axs[1].grid(True)
     if history_u.size > 0:
         time_axis_u = np.arange(history_u.shape[0]) * MPCConfig.DT
-        axs[2].step(time_axis_u, history_u[:, 0], where='post', label='Volume 1'); axs[2].step(time_axis_u, history_u[:, 1], where='post', label='Volume 2'); axs[2].step(time_axis_u, history_u[:, 2], where='post', label='Volume 3')
-    axs[2].set_ylabel('Control Input'); axs[2].set_xlabel('Time (s)'); axs[2].set_title('MPC Control Inputs'); axs[2].legend(); axs[2].grid(True)
+        axs[2].step(time_axis_u, history_u[:, 0], where='post', label='Volume 1')
+        axs[2].step(time_axis_u, history_u[:, 1], where='post', label='Volume 2')
+        axs[2].step(time_axis_u, history_u[:, 2], where='post', label='Volume 3')
+    axs[2].set_ylabel('Control Input')
+    axs[2].set_xlabel('Time (s)')
+    axs[2].set_title('MPC Control Inputs'); axs[2].legend(); axs[2].grid(True)
     plt.tight_layout()
     plot_path = 'results/mpc_casadi.png'
     plt.savefig(plot_path)
@@ -212,7 +242,8 @@ if __name__ == "__main__":
     # Define the full_pytorch_model in the global scope for the sequential rollout
     # This is a bit of a hack but avoids passing all scaler objects around
     payload = torch.load(TrainConfig.MODEL_PATH)
-    model_g = StatePredictor(input_dim=10, output_dim=6); model_g.load_state_dict(payload)
+    model_g = StatePredictor(input_dim=10, output_dim=6)
+    model_g.load_state_dict(payload)
     input_scaler_g = joblib.load(TrainConfig.INPUT_SCALER_PATH)
     output_scaler_g = joblib.load(TrainConfig.OUTPUT_SCALER_PATH)
     
