@@ -11,7 +11,7 @@ def build_trajectories(n_trajectories, trajectory_time, max_torque, pause_time):
     """
     trajectories = []
     
-    print(f"Building {n_trajectories} trajectories...")
+    print(f"\nBuilding {n_trajectories} trajectories...")
     print(f"Each trajectory holds a constant torque for {trajectory_time}s")
     
     for traj_idx in range(n_trajectories):

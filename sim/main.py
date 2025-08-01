@@ -22,9 +22,10 @@ matplotlib.use('Qt5Agg')  # Use interactive backend
 SAVE_RESULTS = True
 SAVE_VIDEO = False
 REAL_TIME_PLOT = False
-N_TRAJECTORIES = 2
+N_TRAJECTORIES = 1000
 TRAJECTORY_TIME = 10
 PAUSE_TIME = 5
+plot_every_n_steps = 1000
 
 # rod parameters
 simulation_params = {
@@ -46,10 +47,6 @@ if N_TRAJECTORIES > 0:
     final_time = N_TRAJECTORIES * (TRAJECTORY_TIME + PAUSE_TIME) + 1
 else:
     final_time = 10
-plot_every_n_steps = 200
-
-
-
 
 def main():
 
@@ -74,7 +71,7 @@ def main():
     
     # Print simulation info
     sim_info = cc_sim.get_simulation_info()
-    print("Simulation Configuration:")
+    print("\nSimulation Configuration:")
     for key, value in sim_info.items():
         print(f"  {key}: {value}")
         
@@ -122,8 +119,6 @@ def main():
                         cycle_time = (current_time - 0.5) % trajectory_cycle_time
                         if cycle_time < TRAJECTORY_TIME:
                             print(f"\nStarting trajectory {current_trajectory + 1} at time {current_time:.2f}s")
-                        else:
-                            print(f"\nPause period after trajectory {current_trajectory + 1} at time {current_time:.2f}s")
                     
                     # Get current torques based on trajectory execution
                     rod1_torque, rod2_torque = get_current_torques(
