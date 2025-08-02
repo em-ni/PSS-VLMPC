@@ -1,3 +1,4 @@
+# main.py
 import matplotlib
 import matplotlib.pyplot as plt
 import imageio_ffmpeg
@@ -195,20 +196,26 @@ def main():
     if SAVE_RESULTS and callback_params:
         print("\nSaving simulation results...")
         
-        # Clean results folder
-        if not os.path.exists("results"):
-            os.makedirs("results")
+        # Define the target directory
+        results_dir = "results"
+
+        # Ensure the results directory exists
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir)
         else:
-            for file in os.listdir("results"):
-                file_path = os.path.join("results", file)
-                try:
-                    if os.path.isfile(file_path) or os.path.islink(file_path):
-                        os.unlink(file_path)
-                    elif os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                except Exception as e:
-                    print(f"Failed to delete {file_path}. Reason: {e}")
-        
+            # Iterate over all the items in the directory
+            for filename in os.listdir(results_dir):
+                # Check if the item's name ends with .dat
+                if filename.endswith(".dat"):
+                    file_path = os.path.join(results_dir, filename)
+                    try:
+                        # Extra check to ensure it's a file before trying to delete
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                            print(f"Deleted data file: {file_path}")
+                    except Exception as e:
+                        print(f"Failed to delete {file_path}. Reason: {e}")
+                
         # Save data for each rod
         for i, params in enumerate(callback_params):
             filename = f"results/rod{i+1}.dat"

@@ -8,6 +8,7 @@ from torch.func import vmap, jacrev
 import casadi as ca
 import joblib
 import matplotlib.pyplot as plt
+from scipy.linalg import solve_discrete_are
 
 # Import exactly as requested
 from model.train_sim import StatePredictor, TrainingConfig as TrainConfig
@@ -21,13 +22,14 @@ class MPCConfig:
     N = 20
     DT = 0.020
     SIM_TIME = 10.0
-    q_pos = 50.0
-    q_vel = 5.0
+    q_pos = 30.0
+    q_vel = 3.0
     Q_diag = [q_pos, q_pos, q_pos, q_vel, q_vel, q_vel]
     r_diag = 100.0
     R_diag = [r_diag, r_diag, r_diag, r_diag]  
     r_rate_diag = 3000.0
     R_rate_diag = [r_rate_diag, r_rate_diag, r_rate_diag, r_rate_diag] 
+    LAMBDA = 10
     max_torque = 9e-2
     U_MIN = [-max_torque, -max_torque, -max_torque, -max_torque]
     U_MAX = [max_torque, max_torque, max_torque, max_torque]
@@ -70,6 +72,34 @@ def get_batch_predictions_and_jacobians(model, input_scaler, output_scaler, x_tr
     return y_pred_batch.detach().numpy(), J_batch.detach().numpy()
 
 
+def compute_terminal_cost_matrix(A, B, Q, R):
+    """
+    Compute the terminal cost matrix P by solving the discrete algebraic Riccati equation (DARE).
+    
+    Args:
+        A: State transition matrix (n_states x n_states)
+        B: Control input matrix (n_states x n_controls)
+        Q: State cost matrix (n_states x n_states)
+        R: Control cost matrix (n_controls x n_controls)
+    
+    Returns:
+        P: Terminal cost matrix (n_states x n_states)
+        K: Optimal feedback gain matrix (n_controls x n_states)
+    """
+    try:
+        # Solve the discrete algebraic Riccati equation
+        P = solve_discrete_are(A, B, Q, R)
+        
+        # Compute the optimal feedback gain
+        K = np.linalg.inv(R + B.T @ P @ B) @ (B.T @ P @ A)
+        
+        return P, K
+    except Exception as e:
+        print(f"Warning: Failed to solve DARE, using Q as terminal cost: {e}")
+        # Fallback to using Q as terminal cost
+        return Q, np.zeros((B.shape[1], A.shape[0]))
+
+
 def run_mpc_simulation():
     # --- Phase 1: Initialization ---
     print("--- Loading simulation model assets ---")
@@ -89,7 +119,7 @@ def run_mpc_simulation():
         sys.exit()
 
     # --- Phase 2: Define the Optimization Problem (OCP) ---
-    print("--- Setting up OCP with Balanced Tuning ---")
+    print("--- Setting up OCP with Terminal Cost ---")
     opti = ca.Opti()
     n_states, n_controls = 6, 4  # 6 states, 4 torque controls
     
@@ -102,12 +132,16 @@ def run_mpc_simulation():
     A_params = [opti.parameter(n_states, n_states) for _ in range(MPCConfig.N)]
     B_params = [opti.parameter(n_states, n_controls) for _ in range(MPCConfig.N)]
     C_params = [opti.parameter(n_states, 1) for _ in range(MPCConfig.N)]
+    
+    # Terminal cost matrix parameter (will be updated based on linearization around reference)
+    P_terminal = opti.parameter(n_states, n_states)
 
     cost = 0
     Q = ca.diag(MPCConfig.Q_diag)
     R = ca.diag(MPCConfig.R_diag)
     R_rate = ca.diag(MPCConfig.R_rate_diag)
     
+    # Stage costs
     for k in range(MPCConfig.N):
         cost += (X[:, k] - x_ref).T @ Q @ (X[:, k] - x_ref)
         cost += U[:, k].T @ R @ U[:, k]
@@ -116,7 +150,10 @@ def run_mpc_simulation():
         else: 
             cost += (U[:, k] - U[:, k-1]).T @ R_rate @ (U[:, k] - U[:, k-1])
 
-    cost += (X[:, MPCConfig.N] - x_ref).T @ Q @ (X[:, MPCConfig.N] - x_ref)
+    # Terminal cost: Vf(x̃_N) = x̃_N^T * P * x̃_N, where x̃_N = X[:, N] - x_ref
+    x_terminal_error = X[:, MPCConfig.N] - x_ref
+    cost += x_terminal_error.T @ P_terminal @ x_terminal_error
+    
     opti.minimize(cost)
     
     opti.subject_to(X[:, 0] == x0)
@@ -149,6 +186,10 @@ def run_mpc_simulation():
     u_guess = np.zeros((n_controls, MPCConfig.N))
     last_u_optimal = np.zeros(n_controls)
     
+    # Initialize matrices for terminal cost computation
+    Q_np = np.diag(MPCConfig.Q_diag)
+    R_np = np.diag(MPCConfig.R_diag)
+    
     sim_times = []
     start = time.time()
     for i in range(n_steps):
@@ -176,6 +217,18 @@ def run_mpc_simulation():
             opti.set_value(A_params[k], A_k)
             opti.set_value(B_params[k], B_k)
             opti.set_value(C_params[k], C_k.reshape(-1, 1))
+        
+        # --- Step 3a.5: Compute Terminal Cost Matrix ---
+        # Use the linearization at the final horizon step for terminal cost computation
+        A_terminal = J_batch[-1][:, n_controls:n_controls+n_states]
+        B_terminal = J_batch[-1][:, :n_controls]
+        
+        # Compute terminal cost matrix P by solving DARE
+        P_matrix, _ = compute_terminal_cost_matrix(A_terminal, B_terminal, Q_np, R_np)
+        
+        # Multiply by a gain
+        P_matrix *= MPCConfig.LAMBDA 
+        opti.set_value(P_terminal, P_matrix)
         
         # --- Step 3b: Set Current Values and Solve ---
         opti.set_value(x0, x_current)
@@ -231,7 +284,7 @@ def run_mpc_simulation():
     axs[0].axhline(y=x_target[1], color='g', linestyle='--', label='Target Y')
     axs[0].axhline(y=x_target[2], color='b', linestyle='--', label='Target Z')
     axs[0].set_ylabel('Position')
-    axs[0].set_title('MPC Trajectory (Simulation Model - Batched Linearization)')
+    axs[0].set_title('MPC Trajectory with Terminal Cost (Simulation Model - Batched Linearization)')
     axs[0].legend()
     axs[0].grid(True)
     

@@ -2,8 +2,7 @@ import torch
 from torch.func import vmap, jacrev
 import numpy as np
 
-from config import TrainingConfig
-from model.train_example import NeuralNetwork
+from model.train_example import NeuralNetwork, TrainingConfig
 from system_x_dot.system_optimizer import SystemOptimizer
 
 class SystemMPC:

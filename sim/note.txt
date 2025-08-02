@@ -1,0 +1,2 @@
+remember I want to the vlm to design the cost function such that is stable, so respecting the conditions in Neural Network-Based Model Predictive Control with Input-to-State Stability.
+First for a single constant reference and then extending to a moving reference (trajectory tracking)

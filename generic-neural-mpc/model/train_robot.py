@@ -26,6 +26,56 @@ class TrainingConfig:
     BATCH_SIZE = 32
     LEARNING_RATE = 0.001
 
+class StatePredictor(nn.Module):
+    """A simple feed-forward neural network for state prediction."""
+    def __init__(self, input_dim, output_dim):
+        super(StatePredictor, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, output_dim)
+        )
+    
+    def forward(self, x):
+        return self.network(x)
+    
+# This bigger model is more precise but the mpc has slower convergence
+"""A bigger, more precise neural network can paradoxically lead to slower MPC convergence because its complexity creates a "jagged" and non-smooth function landscape. The MPC relies on linear approximations (the tangent slope) at each step to find the next best move. On a smooth landscape, these approximations are accurate over a large area, allowing the optimizer to take confident, large steps and converge quickly. On the jagged landscape of the bigger model, the linear approximation is only valid for a tiny, immediate area. This forces the optimizer to take very small, cautious steps and run many more iterations, dramatically slowing down the process. Essentially, for this type of optimization, the smoothness of the model is more important than its absolute precision, and the simpler model provides a much smoother, more navigable landscape for the controller to work with.
+"""
+# class StatePredictor(nn.Module):
+#     """A simple feed-forward neural network for state prediction."""
+#     def __init__(self, input_dim, output_dim):
+#         super(StatePredictor, self).__init__()
+#         self.network = nn.Sequential(
+#             nn.Linear(input_dim, 128),
+#             nn.ReLU(),
+#             nn.Linear(128, 256),
+#             nn.ReLU(),
+#             nn.Linear(256, 128),
+#             nn.ReLU(),
+#             nn.Linear(128, output_dim)
+#         )
+    
+#     def forward(self, x):
+#         return self.network(x)
+
+class RobotStateDataset(Dataset):
+    """Custom PyTorch Dataset."""
+    def __init__(self, X, y):
+        # Convert numpy arrays to PyTorch tensors
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.float32)
+        
+    def __len__(self):
+        return len(self.X)
+    
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+
 
 def load_and_prepare_data(filepath):
     """
@@ -72,55 +122,6 @@ def load_and_prepare_data(filepath):
     
     print("Finished processing data.")
     return X, y
-class RobotStateDataset(Dataset):
-    """Custom PyTorch Dataset."""
-    def __init__(self, X, y):
-        # Convert numpy arrays to PyTorch tensors
-        self.X = torch.tensor(X, dtype=torch.float32)
-        self.y = torch.tensor(y, dtype=torch.float32)
-        
-    def __len__(self):
-        return len(self.X)
-    
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
-
-class StatePredictor(nn.Module):
-    """A simple feed-forward neural network for state prediction."""
-    def __init__(self, input_dim, output_dim):
-        super(StatePredictor, self).__init__()
-        self.network = nn.Sequential(
-            nn.Linear(input_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, output_dim)
-        )
-    
-    def forward(self, x):
-        return self.network(x)
-    
-# This bigger model is more precise but the mpc has slower convergence
-"""A bigger, more precise neural network can paradoxically lead to slower MPC convergence because its complexity creates a "jagged" and non-smooth function landscape. The MPC relies on linear approximations (the tangent slope) at each step to find the next best move. On a smooth landscape, these approximations are accurate over a large area, allowing the optimizer to take confident, large steps and converge quickly. On the jagged landscape of the bigger model, the linear approximation is only valid for a tiny, immediate area. This forces the optimizer to take very small, cautious steps and run many more iterations, dramatically slowing down the process. Essentially, for this type of optimization, the smoothness of the model is more important than its absolute precision, and the simpler model provides a much smoother, more navigable landscape for the controller to work with.
-"""
-# class StatePredictor(nn.Module):
-#     """A simple feed-forward neural network for state prediction."""
-#     def __init__(self, input_dim, output_dim):
-#         super(StatePredictor, self).__init__()
-#         self.network = nn.Sequential(
-#             nn.Linear(input_dim, 128),
-#             nn.ReLU(),
-#             nn.Linear(128, 256),
-#             nn.ReLU(),
-#             nn.Linear(256, 128),
-#             nn.ReLU(),
-#             nn.Linear(128, output_dim)
-#         )
-    
-#     def forward(self, x):
-#         return self.network(x)
 
 def train_model(model, train_loader, val_loader, num_epochs, learning_rate, device):
     """The main training loop."""

@@ -2,7 +2,32 @@ from acados_template import AcadosOcp, AcadosOcpSolver
 from casadi import SX
 import numpy as np
 
-from config import SystemConfig, MPCConfig
+from model.train_example import SystemConfig
+
+# --- MPC Configuration ---
+class MPCConfig:
+    T = 10.0  # Total simulation time (seconds)
+    DT = 0.05  # Time step for simulation
+    N_HORIZON = 20  # Number of steps in the prediction horizon
+    T_HORIZON = 1.0  # Total time for the prediction horizon (seconds)
+    
+    # --- MPC TUNING: COST MATRICES ---
+
+    # Q: State Cost Matrix. How much do we care about tracking error?
+    # Penalize position error more than velocity error.
+    Q_pos = 100.0  # Penalty on position error (x0, x1, x2)
+    Q_vel = 1.0    # Lower penalty on velocity error (x3, x4, x5)
+    Q = np.diag([Q_pos, Q_pos, Q_pos, Q_vel, Q_vel, Q_vel])
+
+    # R: Control Cost Matrix. How much do we care about control effort?
+    # This is the most important parameter for stability.
+    # Start with a significantly higher value to prevent chattering.
+    R_val = 0.5  # INCREASED SIGNIFICANTLY (was 0.01 or 0.1)
+    R = np.diag([R_val] * SystemConfig.CONTROL_DIM)
+    
+    # Control constraints
+    U_MIN = [-1.0] * SystemConfig.CONTROL_DIM
+    U_MAX = [1.0] * SystemConfig.CONTROL_DIM
 
 class SystemOptimizer:
     def __init__(self):

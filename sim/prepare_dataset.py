@@ -1,3 +1,43 @@
+"""
+Last dataset 2/8/25:
+
+Processed 750051 time steps
+Time range: 0.00 - 15001.00 ms
+Complete dataset saved to: results/sim_dataset.csv
+Creating neural network training data...
+Created 750050 training samples
+Input features shape: (750050, 11)
+Target outputs shape: (750050, 6)
+
+Dataset Statistics:
+==================================================
+Total samples: 750050
+Input dimensions: 11
+Output dimensions: 6
+Time step (dt): 0.02
+
+Input ranges:
+  rod1_torque_x_k: [-0.137872, 0.145008]
+  rod1_torque_y_k: [-0.144178, 0.156151]
+  rod2_torque_x_k: [-0.052293, 0.052114]
+  rod2_torque_y_k: [-0.051869, 0.057591]
+  tip_position_x_k: [-0.703178, 0.704306]
+  tip_position_y_k: [-0.705243, 0.706738]
+  tip_position_z_k: [-0.800292, 0.496858]
+  tip_velocity_x_k: [-0.624930, 0.636474]
+  tip_velocity_y_k: [-0.642704, 0.624778]
+  tip_velocity_z_k: [-0.789484, 1.034373]
+  dt: [0.020000, 0.020000]
+
+Output ranges:
+  tip_position_x_k+1: [-0.703178, 0.704306]
+  tip_position_y_k+1: [-0.705243, 0.706738]
+  tip_position_z_k+1: [-0.800292, 0.496858]
+  tip_velocity_x_k+1: [-0.624930, 0.636474]
+  tip_velocity_y_k+1: [-0.642704, 0.624778]
+  tip_velocity_z_k+1: [-0.789484, 1.034373]
+"""
+
 import os
 import pickle
 import numpy as np

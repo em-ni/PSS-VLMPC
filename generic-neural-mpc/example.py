@@ -1,40 +1,57 @@
+"""
+This example uses both casadi and acados for controlling a generic system whose dyanmics are modeled entirely by a NN
+x_dot = f(x,u) ~ NN
+"""
+
 import time
 import numpy as np
 import torch
 from tqdm import tqdm
 import os
 import shutil
+import matplotlib.pyplot as plt
 
 from model.train_example import SystemConfig
 from system_x_dot.system import GenericSystem
 from system_x_dot.system_mpc import SystemMPC
-from utils.plotter import plot_results
+from system_x_dot.system_optimizer import MPCConfig
 from model.train_example import true_system_dynamics_dt
 
-# --- MPC Configuration ---
-class MPCConfig:
-    T = 10.0  # Total simulation time (seconds)
-    DT = 0.05  # Time step for simulation
-    N_HORIZON = 20  # Number of steps in the prediction horizon
-    T_HORIZON = 1.0  # Total time for the prediction horizon (seconds)
+def plot_results(t_series, x_history, u_history, x_ref_history, title="MPC Trajectory Tracking"):
+    """Plots the state and control trajectories and saves the figure."""
     
-    # --- MPC TUNING: COST MATRICES ---
-
-    # Q: State Cost Matrix. How much do we care about tracking error?
-    # Penalize position error more than velocity error.
-    Q_pos = 100.0  # Penalty on position error (x0, x1, x2)
-    Q_vel = 1.0    # Lower penalty on velocity error (x3, x4, x5)
-    Q = np.diag([Q_pos, Q_pos, Q_pos, Q_vel, Q_vel, Q_vel])
-
-    # R: Control Cost Matrix. How much do we care about control effort?
-    # This is the most important parameter for stability.
-    # Start with a significantly higher value to prevent chattering.
-    R_val = 0.5  # INCREASED SIGNIFICANTLY (was 0.01 or 0.1)
-    R = np.diag([R_val] * SystemConfig.CONTROL_DIM)
+    num_states = x_history.shape[1]
+    num_controls = u_history.shape[1]
     
-    # Control constraints
-    U_MIN = [-1.0] * SystemConfig.CONTROL_DIM
-    U_MAX = [1.0] * SystemConfig.CONTROL_DIM
+    fig, axes = plt.subplots(num_states + num_controls, 1, figsize=(12, 2.5 * (num_states + num_controls)), sharex=True)
+    fig.suptitle(title, fontsize=16)
+    
+    # Plot states
+    for i in range(num_states):
+        axes[i].plot(t_series, x_history[:, i], label=f'State x{i} (Actual)')
+        axes[i].plot(t_series, x_ref_history[:, i], 'r--', label=f'State x{i} (Reference)')
+        axes[i].set_ylabel(f'x{i}')
+        axes[i].legend()
+        axes[i].grid(True)
+        
+    # Plot controls
+    for i in range(num_controls):
+        ax_idx = num_states + i
+        # Note: u_history has one less element than t_series
+        axes[ax_idx].plot(t_series[:-1], u_history[:, i], label=f'Control u{i}')
+        axes[ax_idx].set_ylabel(f'u{i}')
+        axes[ax_idx].legend()
+        axes[ax_idx].grid(True)
+
+    axes[-1].set_xlabel('Time (s)')
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    
+    # --- Save the figure instead of showing it ---
+    save_path = "results/example_results.png"
+    plt.savefig(save_path)
+    print(f"Plot saved to {os.path.abspath(save_path)}")
+    plt.close(fig) # Close the figure to free up memory
+    # plt.show() # Comment out or remove this line
 
 def plant_dynamics(x, u):
     """Wrapper to use the torch-based true dynamics with numpy."""
