@@ -6,7 +6,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from functorch import vmap, jacrev, hessian
+# from functorch import vmap, jacrev, hessian # deprecated
+from torch.func import vmap, jacrev, hessian
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -19,15 +20,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TrainingConfig:
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-    # SIM_DATASET_PATH = os.path.abspath(os.path.join(BASE_DIR, "../../sim/results/sim_dataset.csv"))
-    SIM_DATASET_PATH = os.path.abspath(os.path.join(BASE_DIR, "../../sim/results/sim_dataset_old.csv"))
+    SIM_DATASET_PATH = os.path.abspath(os.path.join(BASE_DIR, "../../sim/results/sim_dataset.csv"))
+    # SIM_DATASET_PATH = os.path.abspath(os.path.join(BASE_DIR, "../../sim/results/sim_dataset_old.csv"))
     MODEL_PATH = os.path.join(BASE_DIR, "data", "sim_rob_f.pth")
     INPUT_SCALER_PATH = os.path.join(BASE_DIR, "data", "sim_rob_i_scaler.joblib")
     OUTPUT_SCALER_PATH = os.path.join(BASE_DIR, "data", "sim_rob_o_scaler.joblib")
     PLOT_OUTPUT_PATH = os.path.join(BASE_DIR, "data", "sim_rob_perf.png")
     
-    NUM_EPOCHS = 20
-    BATCH_SIZE = 256
+    NUM_EPOCHS = 2
+    BATCH_SIZE = 64
     TEST_SIZE = 0.2
     VAL_SIZE = 0.2
     LEARNING_RATE = 1e-3
@@ -50,11 +51,13 @@ class StatePredictor(nn.Module):
         super(StatePredictor, self).__init__()
         self.network = nn.Sequential(
             nn.Linear(input_dim, 128),
-            nn.SiLU(),
+            nn.Tanh(),
             nn.Linear(128, 256),
-            nn.SiLU(),
+            nn.Tanh(),
+            nn.Linear(256, 256),
+            nn.Tanh(),
             nn.Linear(256, 128),
-            nn.SiLU(),
+            nn.Tanh(),
             nn.Linear(128, output_dim)
         )
     
@@ -78,8 +81,8 @@ class RobotStateDataset(Dataset):
 def load_and_prepare_data(filepath):
     """
     Loads data from a single continuous trajectory CSV.
-    Calculates dt and creates pairs where:
-      X = [torques_k, state_k, dt]
+    Creates pairs where:
+      X = [torques_k, state_k]
       y = [state_k+1]
     
     The input CSV format is assumed to be:
@@ -123,13 +126,8 @@ def load_and_prepare_data(filepath):
     # Get the target state for the next time step 'k+1' (all rows except the first one)
     next_state = df[STATE_COLS].iloc[1:].values
     
-    # Calculate dt
-    times_ms = df['T'].values
-    dt_seconds = (times_ms[1:] - times_ms[:-1])
-    dt_seconds_col = dt_seconds.reshape(-1, 1) # Reshape for horizontal stacking
-    
-    # Assemble the final input matrix # X = [u_k, x_k, dt]
-    X = np.hstack([current_features, dt_seconds_col])
+    # Assemble the final input matrix # X = [u_k, x_k]
+    X = current_features
     
     # The output matrix y is simply the next state
     y = next_state
@@ -423,7 +421,7 @@ def evaluate_approximation_rollouts(model, X_test_orig, y_test_orig, input_scale
     # Setup approximator
     approximator = NeuralNetworkApproximator(model, input_scaler, output_scaler, device)
     
-    # X = [torques_k (4), state_k (6), dt (1)] -> state is columns 4 to 10
+    # X = [torques_k (4), state_k (6)] -> state is columns 4 to 10
     num_state_dims = y_test_orig.shape[1]
     state_start_col = 4  # Assumes 4 torque inputs
     state_end_col = state_start_col + num_state_dims
@@ -461,15 +459,11 @@ def evaluate_approximation_rollouts(model, X_test_orig, y_test_orig, input_scale
                     # Index for the current step in the original test set
                     step_idx = start_idx + i
                     
-                    # Get the ground-truth control inputs and dt for this step
-                    control_and_dt_sequence = np.delete(X_test_orig[step_idx], np.s_[state_start_col:state_end_col])
+                    # Get the ground-truth control inputs for this step
+                    control_inputs = X_test_orig[step_idx, :state_start_col]
                     
                     # Assemble the input vector for the model using the *predicted* state
-                    input_vec = np.hstack([
-                        control_and_dt_sequence[:state_start_col],
-                        current_state,
-                        control_and_dt_sequence[state_start_col:]
-                    ])
+                    input_vec = np.hstack([control_inputs, current_state])
                     
                     # Convert to tensor
                     input_tensor = torch.tensor(input_vec, dtype=torch.float32, device=device)
@@ -560,7 +554,7 @@ def evaluate_multi_horizon_rollouts(model, X_test_orig, y_test_orig, input_scale
     print("\n--- Evaluating on Test Set (Multi-Horizon Rollouts) ---")
     model.eval()
 
-    # X = [torques_k (4), state_k (6), dt (1)] -> state is columns 4 to 10
+    # X = [torques_k (4), state_k (6)] -> state is columns 4 to 10
     num_state_dims = y_test_orig.shape[1]
     state_start_col = 4 # Assumes 4 torque inputs
     state_end_col = state_start_col + num_state_dims
@@ -595,15 +589,11 @@ def evaluate_multi_horizon_rollouts(model, X_test_orig, y_test_orig, input_scale
                     # Index for the current step in the original test set
                     step_idx = start_idx + i
                     
-                    # Get the ground-truth control inputs and dt for this step
-                    control_and_dt_sequence = np.delete(X_test_orig[step_idx], np.s_[state_start_col:state_end_col])
+                    # Get the ground-truth control inputs for this step
+                    control_inputs = X_test_orig[step_idx, :state_start_col]
                     
                     # Assemble the input vector for the model using the *predicted* state
-                    input_vec = np.hstack([
-                        control_and_dt_sequence[:state_start_col], 
-                        current_state, 
-                        control_and_dt_sequence[state_start_col:]
-                    ])
+                    input_vec = np.hstack([control_inputs, current_state])
 
                     # Scale -> Predict -> Unscale
                     input_tensor = torch.tensor(input_scaler.transform(input_vec.reshape(1, -1)), dtype=torch.float32).to(device)

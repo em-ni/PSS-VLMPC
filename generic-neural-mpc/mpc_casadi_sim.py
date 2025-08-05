@@ -81,7 +81,7 @@ class MPCController:
             self.df = pd.read_csv(MPCConfig.SIM_DATASET_PATH)
             self.df.columns = self.df.columns.str.strip()
             
-            self.model = StatePredictor(input_dim=11, output_dim=6)
+            self.model = StatePredictor(input_dim=10, output_dim=6)
             self.model.load_state_dict(torch.load(MPCConfig.MODEL_PATH))
             self.model.eval()  # Set to evaluation mode
             
@@ -271,8 +271,7 @@ class MPCController:
         self.model.to('cpu').eval()
 
         # Combine state and control trajectories into a single input batch
-        dt_col = np.full((u_traj_np.shape[0], 1), MPCConfig.DT)
-        x_and_u_traj_np = np.hstack([u_traj_np, x_traj_np, dt_col])
+        x_and_u_traj_np = np.hstack([u_traj_np, x_traj_np])
         
         batch_size = x_and_u_traj_np.shape[0]
         
@@ -413,7 +412,7 @@ class MPCController:
         
         # Sequentially roll out the nominal trajectory
         for k in range(MPCConfig.N - 1):
-            model_input_k = np.concatenate([self.u_guess[:, k], x_guess_np[k, :], [MPCConfig.DT]])
+            model_input_k = np.concatenate([self.u_guess[:, k], x_guess_np[k, :]])
             with torch.no_grad():
                 model_input_torch = torch.from_numpy(model_input_k).float()
                 x_next = self.full_pytorch_model(model_input_torch).numpy()
@@ -545,7 +544,7 @@ class MPCController:
     
     def simulate_system(self, x_current, u_control):
         """Simulate the system for one step using the control input"""
-        model_input_sim = np.concatenate([u_control, x_current, [MPCConfig.DT]])
+        model_input_sim = np.concatenate([u_control, x_current])
         with torch.no_grad():
              x_next = self.full_pytorch_model(torch.from_numpy(model_input_sim).float()).numpy()
         return x_next
@@ -677,4 +676,4 @@ def run_mpc_simulation(mode = 'spr', nn_approximation_order=1):
 if __name__ == "__main__":
     mode = 'spr' # set point regulation
     # mode = 'tt' # trajectory tracking
-    run_mpc_simulation(mode=mode, nn_approximation_order=2) 
+    run_mpc_simulation(mode=mode, nn_approximation_order=2)
