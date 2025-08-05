@@ -265,6 +265,22 @@ class Sim:
         """Return the callback parameters for data collection."""
         return self.callback_params
     
+    def get_tip_state(self):
+        """
+        Get the state of the tip of the last rod.
+        
+        Returns:
+        --------
+        np.ndarray
+            Position and orientation of the tip of the last rod
+        """
+        if self.rods:
+            rod = self.rods[-1]
+            return np.concatenate((rod.position_collection[-1], rod.director_collection[-1]))
+        else:
+            raise ValueError("No rods available in the simulation.")
+
+
     def step(self, time):
         """
         Advance the simulation by one time step.
