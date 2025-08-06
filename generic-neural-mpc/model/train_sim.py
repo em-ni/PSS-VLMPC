@@ -27,7 +27,7 @@ class TrainingConfig:
     OUTPUT_SCALER_PATH = os.path.join(BASE_DIR, "data", "sim_rob_o_scaler.joblib")
     PLOT_OUTPUT_PATH = os.path.join(BASE_DIR, "data", "sim_rob_perf.png")
     
-    NUM_EPOCHS = 2
+    NUM_EPOCHS = 100
     BATCH_SIZE = 64
     TEST_SIZE = 0.2
     VAL_SIZE = 0.2

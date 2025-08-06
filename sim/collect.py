@@ -22,12 +22,11 @@ matplotlib.use('Qt5Agg')  # Use interactive backend
 SAVE_RESULTS = True
 SAVE_VIDEO = False
 REAL_TIME_PLOT = False
-N_TRAJECTORIES = 1  # 1000 trajectories ~ 500k rows
-TRAJECTORY_TIME = 1    # Total time for each trajectory
-HOLD_TIME = 0.2           # Time to hold the last torque before pausing
-PAUSE_TIME = 0.1        # Time to pause with zero torque
+N_TRAJECTORIES = 5000  # 1000 trajectories ~ 500k rows
+TRAJECTORY_TIME = 10    # Total time for each trajectory
+HOLD_TIME = 2           # Time to hold the last torque before pausing
+PAUSE_TIME = 1        # Time to pause with zero torque
 plot_every_n_steps = 1000
-current_trajectory = -1
 
 # rod parameters
 simulation_params = {
@@ -196,10 +195,9 @@ def main():
         rod_2_torque = np.array([0.0, 0.0])
         # sim loop
         for i in tqdm(range(total_steps)):
-            # --- control for data collection ---
             # Update torque value with the mpc frequency (mpc loop)
             if i % step_skip == 0:
-                print(f"\nStep {i+1}/{total_steps}, Time: {time:.2f}s, Trajectory: {trajectory_index+1}/{len(trajectories)}, torque index: {torque_index}/{len(trajectories[trajectory_index][0])}")
+                # print(f"\nStep {i+1}/{total_steps}, Time: {time:.2f}s, Trajectory: {trajectory_index+1}/{len(trajectories)}, torque index: {torque_index}/{len(trajectories[trajectory_index][0])}")
                 times.append(time)
                 if trajectory_index < len(trajectories):
                     # Get the current trajectory and rod torques

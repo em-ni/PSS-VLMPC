@@ -108,7 +108,7 @@ def main():
         plotter = RTPlotter(rods_list)
     
     # Initialize MPC controller
-    mpc = MPCController(nn_approximation_order=1)
+    mpc = MPCController(nn_approximation_order=2)
     
     # --- Phase 3: The Simulation Loop ---
     print("\nStarting MPC simulation")
