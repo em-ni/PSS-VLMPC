@@ -549,10 +549,11 @@ class MPCController:
              x_next = self.full_pytorch_model(torch.from_numpy(model_input_sim).float()).numpy()
         return x_next
     
-    def plot_results(self, x_target):
+    def plot_results(self, history_x_target):
         """Plot the MPC results"""
         history_x = np.array(self.history_x)
         history_u = np.array(self.history_u)
+        history_x_target = np.array(history_x_target)
         fig, axs = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
         time_axis = np.arange(history_x.shape[0]) * MPCConfig.DT
         
@@ -560,9 +561,12 @@ class MPCController:
         axs[0].plot(time_axis, history_x[:, 0], label='Tip X')
         axs[0].plot(time_axis, history_x[:, 1], label='Tip Y')
         axs[0].plot(time_axis, history_x[:, 2], label='Tip Z')
-        axs[0].axhline(y=x_target[0], color='r', linestyle='--', label='Target X')
-        axs[0].axhline(y=x_target[1], color='g', linestyle='--', label='Target Y')
-        axs[0].axhline(y=x_target[2], color='b', linestyle='--', label='Target Z')
+        # axs[0].axhline(y=x_target[0], color='r', linestyle='--', label='Target X')
+        # axs[0].axhline(y=x_target[1], color='g', linestyle='--', label='Target Y')
+        # axs[0].axhline(y=x_target[2], color='b', linestyle='--', label='Target Z')
+        axs[0].plot(time_axis, history_x_target[:, 0], 'r--', label='Target X')
+        axs[0].plot(time_axis, history_x_target[:, 1], 'g--', label='Target Y')
+        axs[0].plot(time_axis, history_x_target[:, 2], 'b--', label='Target Z')
         axs[0].set_ylabel('Position')
         title_suffix = f"(NN Approximation Order: {self.nn_approximation_order})"
         axs[0].set_title(f'MPC Trajectory with Terminal Cost {title_suffix}')
@@ -618,6 +622,7 @@ def run_mpc_simulation(mode = 'spr', nn_approximation_order=1):
     x_target = np.array([0.01, -0.42, -0.62, 0.0, 0.0, 0.0])
     
     history_x, history_u = [x_current], []
+    history_x_target = [x_target]
     n_steps = int(MPCConfig.SIM_TIME / MPCConfig.DT)
     sim_times = []
     
@@ -652,6 +657,7 @@ def run_mpc_simulation(mode = 'spr', nn_approximation_order=1):
         # Store history
         history_x.append(x_current)
         history_u.append(u_mpc)
+        history_x_target.append(x_target)
         
         if i % 10 == 0 or i == 0:
             dist_to_target = np.linalg.norm(x_current[:3] - x_target[:3])
@@ -671,9 +677,9 @@ def run_mpc_simulation(mode = 'spr', nn_approximation_order=1):
     # Plot results
     mpc.history_x = history_x  # Set for plotting
     mpc.history_u = history_u  # Set for plotting
-    mpc.plot_results(x_target)
+    mpc.plot_results(history_x_target=history_x_target)
 
 if __name__ == "__main__":
     mode = 'spr' # set point regulation
     # mode = 'tt' # trajectory tracking
-    run_mpc_simulation(mode=mode, nn_approximation_order=2)
+    run_mpc_simulation(mode=mode, nn_approximation_order=1)

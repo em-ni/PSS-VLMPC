@@ -346,6 +346,7 @@ class Sim:
             'density': self.density,
             'youngs_modulus': self.youngs_modulus,
             'dt': self.dt,
+            'mpc_dt': self.mpc_dt,
             'double_rod': self.double_rod,
             'max_torque': self.max_torque,
             'num_rods': len(self.rods),
