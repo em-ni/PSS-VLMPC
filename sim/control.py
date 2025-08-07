@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import imageio_ffmpeg
 import os
 import pickle
+import signal
+import atexit
 from elastica.timestepper import tqdm
 from examples.MuscularSnake.post_processing import plot_video_with_surface
 import numpy as np
@@ -25,8 +27,18 @@ ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 matplotlib.rcParams["animation.ffmpeg_path"] = ffmpeg_path
 matplotlib.use('Qt5Agg')  # Use interactive backend
 
+# Cleanup function
+def cleanup():
+    plt.close('all')
+
+# Register cleanup
+atexit.register(cleanup)
+signal.signal(signal.SIGINT, lambda sig, frame: (cleanup(), sys.exit(0)))
+signal.signal(signal.SIGTERM, lambda sig, frame: (cleanup(), sys.exit(0)))
+
 # Simulation settings
 REAL_TIME_PLOT = True
+DEBUG_STATE_PREDICTION = False  # Enable to plot state prediction error
 PLOT_EVERY_N_STEPS = 500
 FINAL_TIME = 10
 # CONTROL_MODE = "spr" # set point regulation
@@ -251,19 +263,21 @@ def main():
             # step sim
             time = cc_sim.step(time)
             
-            if i % step_skip_mpc == 0:
-                # Check the next state prediction of the network the mpc uses
-                x_current_pred = mpc.simulate_system(x_current_mpc, u_mpc)
-                rods_test = cc_sim.get_rods()
-                current_tip_pos_test = rods_test[-1].position_collection[:, -1]
-                current_tip_vel_test = rods_test[-1].velocity_collection[:, -1]
-                x_current_test = np.array(current_tip_pos_test.tolist() + current_tip_vel_test.tolist())
-                state_pred_error = np.linalg.norm(x_current_pred - x_current_test)
+            if DEBUG_STATE_PREDICTION:
+                # Save states for plotting
+                if i % step_skip_mpc == 0:
+                    # Check the next state prediction of the network the mpc uses
+                    x_current_pred = mpc.simulate_system(x_current_mpc, u_mpc)
+                    rods_test = cc_sim.get_rods()
+                    current_tip_pos_test = rods_test[-1].position_collection[:, -1]
+                    current_tip_vel_test = rods_test[-1].velocity_collection[:, -1]
+                    x_current_test = np.array(current_tip_pos_test.tolist() + current_tip_vel_test.tolist())
+                    state_pred_error = np.linalg.norm(x_current_pred - x_current_test)
 
-                history_x_current_test.append(x_current_test)
-                history_x_current_pred.append(x_current_pred)
-                state_pred_error_history.append(state_pred_error)
-                # print(f"\tNN prediction error: {state_pred_error:.4f}")
+                    history_x_current_test.append(x_current_test)
+                    history_x_current_pred.append(x_current_pred)
+                    state_pred_error_history.append(state_pred_error)
+                    # print(f"\tNN prediction error: {state_pred_error:.4f}")
 
             # Check for numerical instability
             if not cc_sim.check_stability():
@@ -296,36 +310,34 @@ def main():
         
     finally:
         # Cleanup VLM
-        if CONTROL_MODE == "vlm":
+        if CONTROL_MODE == "vlm" and 'vlm' in locals():
             print("Stopping VLM input thread...")
             vlm.stop()
             
-        # Keep the final plot open
-        if REAL_TIME_PLOT and plt.get_fignums():
-            print("Press any key in terminal to close...")
-            input()
+        # Close all plots
         plt.close('all')
         
     # Post-processing
     print("Saving simulation data and plotting results...")
 
-    # Plot and save the state prediction error history
-    if state_pred_error_history:
-        plt.figure(figsize=(10, 6))
-        plt.plot(state_pred_error_history)
-        plt.title('State Prediction Error Over Time')
-        plt.xlabel('MPC Step')
-        plt.ylabel('Prediction Error (L2 Norm)')
-        plt.grid(True)
-        plt.savefig('results/state_pred_error.png')
-        print("State prediction error plot saved to results/state_pred_error.png")
-        plt.close()
-        
-    # Save the history of current states and predictions
-    if history_x_current_test and history_x_current_pred:
-        history_x_current_test = np.array(history_x_current_test)
-        history_x_current_pred = np.array(history_x_current_pred)        
-        plot_predictions(history_x_current_test, history_x_current_pred, 'results/predictions_plot.png')
+    if DEBUG_STATE_PREDICTION:
+        # Plot and save the state prediction error history
+        if state_pred_error_history:
+            plt.figure(figsize=(10, 6))
+            plt.plot(state_pred_error_history)
+            plt.title('State Prediction Error Over Time')
+            plt.xlabel('MPC Step')
+            plt.ylabel('Prediction Error (L2 Norm)')
+            plt.grid(True)
+            plt.savefig('results/state_pred_error.png')
+            print("State prediction error plot saved to results/state_pred_error.png")
+            plt.close()
+            
+        # Save the history of current states and predictions
+        if history_x_current_test and history_x_current_pred:
+            history_x_current_test = np.array(history_x_current_test)
+            history_x_current_pred = np.array(history_x_current_pred)        
+            plot_predictions(history_x_current_test, history_x_current_pred, 'results/predictions_plot.png')
         
     print("\nAll done!")
 
