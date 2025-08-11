@@ -1,4 +1,18 @@
 # control.py
+# 
+# VLM Visual Control Integration:
+# The VLM now receives visual context from the simulation, including:
+# - Multi-view robot visualization (XY, XZ, 3D)
+# - Current robot tip position and trajectory history
+# - Target position and trajectory history  
+# - Distance visualization between tip and target
+#
+# To use visual VLM control:
+# 1. Start VLM server: ./llama-server -m ./models/smolvlm-500m-instruct-q4_k_m.gguf -ngl 99 --port 8080
+# 2. Set CONTROL_MODE = "vlm" 
+# 3. Run this script and type commands like "go right", "move up", etc.
+# 4. The VLM will see the current scene and respond accordingly
+#
 import sys
 import matplotlib
 import matplotlib.pyplot as plt
@@ -128,8 +142,8 @@ def main():
     mpc = MPCController(nn_approximation_order=APPROXIMATION_ORDER)
     
     if CONTROL_MODE == "vlm":
-        # Initialize VLM for user input
-        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'])
+        # Initialize VLM for user input (set text_only_mode=False to enable images)
+        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], text_only_mode=True)
         
         # Check if VLM server is running
         if not vlm.check_server():
@@ -140,6 +154,10 @@ def main():
             CONTROL_MODE = 'tt'
         else:
             print("VLM server connected successfully!")
+            if vlm.text_only_mode:
+                print("VLM running in TEXT-ONLY mode for debugging")
+            else:
+                print("VLM running in VISUAL mode with image processing")
             vlm.start_input_thread()
             
         # VLM trajectory variables
@@ -185,6 +203,10 @@ def main():
     history_x_current_test = []
     history_x_current_pred = []
     history_x_target = []
+    
+    # VLM visual history for better context
+    tip_position_history = []
+    target_position_history = []
 
     # Run simulation
     total_steps = int(FINAL_TIME / simulation_params['dt'])
@@ -205,13 +227,31 @@ def main():
                 current_tip_vel_vlm = rods_vlm[-1].velocity_collection[:, -1]
                 x_current_vlm = np.array(current_tip_pos_vlm.tolist() + current_tip_vel_vlm.tolist())
                 
-                # Process VLM input
-                new_trajectory, target_name = vlm.process_user_input(x_current_vlm)
+                # Update position histories for VLM context
+                tip_position_history.append(current_tip_pos_vlm.copy())
+                if len(history_x_target) > 0:
+                    target_position_history.append(history_x_target[-1][:3])  # Only position, not velocity
+                
+                # Generate scene image for VLM (unless in text-only mode)
+                scene_image = None
+                if not vlm.text_only_mode:
+                    scene_image = vlm.ingest_info(
+                        sim_data=cc_sim,
+                        current_target=x_target[:3] if len(history_x_target) > 0 else None,
+                        tip_history=tip_position_history[-50:],  # Last 50 positions for history
+                        target_history=target_position_history[-50:] if target_position_history else None
+                    )
+
+                # Process VLM input with visual context
+                new_trajectory, target_name = vlm.process_user_input(x_current_vlm, scene_image)
                 
                 if new_trajectory is not None:
                     vlm_trajectory = new_trajectory
                     vlm_trajectory_index = 0
                     print(f"New VLM trajectory activated: {target_name}")
+                    
+                    # Optional: Save scene image for debugging (uncomment to enable)
+                    # vlm.save_scene_image()
                     
                     # Print VLM status
                     status = vlm.get_status()

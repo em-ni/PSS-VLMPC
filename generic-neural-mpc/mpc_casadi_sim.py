@@ -34,6 +34,42 @@ class MPCConfig:
     max_torque = 9e-2
     U_MIN = [-max_torque, -max_torque, -max_torque, -max_torque]
     U_MAX = [max_torque, max_torque, max_torque, max_torque]
+    
+    def stability_check(self):
+        """
+        Check if the MPC configuration is stable (based on Seel et. al., "Neural Network-Based Model Predictive Control with Input-to-State Stability")
+        - A1 and A2 are satisfied by choosing the stabilizing control law and the terminal cost as
+            k_f(x - x_ref) = K^T (x - x_ref)  + u_ref
+        where K is the feedback gain matrix and u_ref is the reference control input.
+            V_f(x - x_ref) = (x - x_ref)^T P (x - x_ref)
+        where K, and P come from the solution of the discrete algebraic Riccati equation (DARE).
+        And by choosing the stage cost as
+            l(x, u) = (x - x_ref)^T Q (x - x_ref) + (u - u_ref)^T R (u - u_ref)
+        with Q, R positive definite matrices.
+        So that the MPC cost function is given by:
+            J = sum_{k=0}^{N-1} l(x_k, u_k) + lambda*V_f(x_N - x_ref)
+        Note: it is required to know a priori u_ref, it can be done by computing the optimal control input for a constant reference, or for example collecting data and using a lookup table.
+        
+        - A3 is assumed for the case of full NN (and confirmed by inspecting the test error accross many point of the workspace)
+            |y - y^| <= mu 
+        where y^ is the output of the NN and y is the true system output.
+        While for the case of Taylor approximation of the NN, the approximation of the NN around a point (x_i, u_i) is given by:
+            f_NN(x, u) = f_NN(x_i, u_i) + J_NN(x, u) * [x - x_i; u - u_i] + 0.5 * [x - x_i; u - u_i] * H_NN(x, u) * [x - x_i; u - u_i]  + o(||x - x_i; u - u_i||^3)
+        and
+            o(||x - x_i; u - u_i||^3) < epsilon
+        Then
+            |y - y^| <= mu + o(||x - x_i; u - u_i||^3) < = mu + epsilon
+        
+        - A4 is satisfied by designing an uniformly continuous NN, so choosing uniformly continuous activation functions (e.g. tanh, sigmoid).
+
+        The discussion above guarantees ISS inside a region of attraction around the reference, the size of this can be regulated by tuning lambda (Limon et al., "On the stability of constrained MPC without terminal constraint")
+
+        In conclusion, if the cost is chosen such that A1 and A2 hold, the NN is chosen and trained such that A3 and A4 holds, the stability check requires to verify that for the parameters Q and R, LAMBDA is large enough to ensure x_0 is inside the region of attraction
+
+        """
+        # Placeholder for stability check logic
+        # For now, we assume the configuration is stable
+        return True
 
 class MPCController:
     def __init__(self, nn_approximation_order=1):
