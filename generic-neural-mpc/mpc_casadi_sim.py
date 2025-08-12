@@ -4,8 +4,6 @@ import time
 import pandas as pd
 import numpy as np
 import torch
-import torch.nn.functional as F
-from torch.autograd.functional import jacobian, hessian
 import casadi as ca
 import joblib
 import matplotlib.pyplot as plt
@@ -121,8 +119,11 @@ class MPCController:
             self.model.load_state_dict(torch.load(MPCConfig.MODEL_PATH))
             self.model.eval()  # Set to evaluation mode
             
-            # Don't JIT compile for now to avoid functorch issues
-            print("Model loaded in standard PyTorch mode (no JIT compilation for derivative compatibility).")
+            # try:
+            #     self.model.compile()
+            #     print("Model successfully compiled")
+            # except Exception as e:
+            #     print(f"Warning: torch.compile failed ({e}), using standard model")
             
             self.input_scaler = joblib.load(MPCConfig.INPUT_SCALER_PATH)
             self.output_scaler = joblib.load(MPCConfig.OUTPUT_SCALER_PATH)
@@ -241,190 +242,53 @@ class MPCController:
     
     def full_pytorch_model(self, x_and_u_torch):
         """Full PyTorch model with scaling"""
-        # Ensure input requires grad for derivative computation
-        if not x_and_u_torch.requires_grad:
-            x_and_u_torch = x_and_u_torch.requires_grad_(True)
-            
         scaled_input = (x_and_u_torch - self.input_mean) / self.input_scale
         scaled_output = self.model(scaled_input)
         return scaled_output * self.output_scale + self.output_mean
     
-    def compute_finite_differences(self, x_and_u_np, h=1e-6):
-        """Compute Jacobian and Hessian using finite differences as fallback"""
-        input_dim = len(x_and_u_np)
-        x_and_u_tensor = torch.tensor(x_and_u_np, dtype=torch.float32, requires_grad=False)
-        
-        # Forward pass for baseline
-        with torch.no_grad():
-            f0 = self.full_pytorch_model(x_and_u_tensor).numpy()
-        
-        # Compute Jacobian using finite differences
-        J = np.zeros((self.n_states, input_dim))
-        for i in range(input_dim):
-            x_plus = x_and_u_np.copy()
-            x_minus = x_and_u_np.copy()
-            x_plus[i] += h
-            x_minus[i] -= h
-            
-            x_plus_tensor = torch.tensor(x_plus, dtype=torch.float32, requires_grad=False)
-            x_minus_tensor = torch.tensor(x_minus, dtype=torch.float32, requires_grad=False)
-            
-            with torch.no_grad():
-                f_plus = self.full_pytorch_model(x_plus_tensor).numpy()
-                f_minus = self.full_pytorch_model(x_minus_tensor).numpy()
-            
-            J[:, i] = (f_plus - f_minus) / (2 * h)
-        
-        # Compute Hessian using finite differences (if needed)
-        H = None
-        if self.nn_approximation_order == 2:
-            H = np.zeros((self.n_states, input_dim, input_dim))
-            for i in range(input_dim):
-                for j in range(input_dim):
-                    # Second-order finite difference formula
-                    x_pp = x_and_u_np.copy()
-                    x_pm = x_and_u_np.copy()
-                    x_mp = x_and_u_np.copy()
-                    x_mm = x_and_u_np.copy()
-                    
-                    x_pp[i] += h; x_pp[j] += h
-                    x_pm[i] += h; x_pm[j] -= h
-                    x_mp[i] -= h; x_mp[j] += h
-                    x_mm[i] -= h; x_mm[j] -= h
-                    
-                    with torch.no_grad():
-                        f_pp = self.full_pytorch_model(torch.tensor(x_pp, dtype=torch.float32)).numpy()
-                        f_pm = self.full_pytorch_model(torch.tensor(x_pm, dtype=torch.float32)).numpy()
-                        f_mp = self.full_pytorch_model(torch.tensor(x_mp, dtype=torch.float32)).numpy()
-                        f_mm = self.full_pytorch_model(torch.tensor(x_mm, dtype=torch.float32)).numpy()
-                    
-                    H[:, i, j] = (f_pp - f_pm - f_mp + f_mm) / (4 * h * h)
-        
-        return f0, J, H
-    
     def get_batch_predictions_and_derivatives(self, x_traj_np, u_traj_np):
-        """Get predictions and derivatives using robust computation methods"""
+        """Get predictions and derivatives using fully batched computation for maximum speed"""
         self.model.to('cpu').eval()
 
         # Combine state and control trajectories into a single input batch
         x_and_u_traj_np = np.hstack([u_traj_np, x_traj_np])
         
-        batch_size = x_and_u_traj_np.shape[0]
+        # Convert to tensor with gradient computation enabled
+        x_and_u_batch = torch.tensor(x_and_u_traj_np, dtype=torch.float32, requires_grad=True)
         
-        # Initialize output arrays
-        y_pred_batch = np.zeros((batch_size, self.n_states))
-        
-        if self.nn_approximation_order >= 1:
-            J_batch = np.zeros((batch_size, self.n_states, x_and_u_traj_np.shape[1]))
-            
-        if self.nn_approximation_order == 2:
-            H_batch = np.zeros((batch_size, self.n_states, x_and_u_traj_np.shape[1], x_and_u_traj_np.shape[1]))
+        # Define a function for the model to use with vmap
+        def model_func(x_and_u_single):
+            return self.full_pytorch_model(x_and_u_single.unsqueeze(0)).squeeze(0)
 
-        # Process each sample individually
-        for i in range(batch_size):
-            x_and_u_sample_np = x_and_u_traj_np[i]
-            
-            try:
-                # First, try using torch.autograd.functional
-                x_and_u_sample = torch.tensor(x_and_u_sample_np, dtype=torch.float32, requires_grad=True)
+        # Vectorized forward pass
+        y_pred_batch = torch.vmap(model_func)(x_and_u_batch)
+        y_pred_batch = y_pred_batch.detach().numpy()
+        try:
+            if self.nn_approximation_order >= 1:
+                # TODO: in place of clipping everytime maybe I can check if they explode 
+                # Vectorized Jacobian
+                jacobian_fn = torch.vmap(torch.func.jacrev(model_func))
+                J_batch = jacobian_fn(x_and_u_batch)
+                J_batch = torch.clamp(J_batch, -1e3, 1e3)  # Clip to prevent explosion
+                J_batch = J_batch.detach().numpy()
                 
-                # Forward pass
-                y_pred = self.full_pytorch_model(x_and_u_sample)
-                y_pred_batch[i] = y_pred.detach().numpy()
+                if self.nn_approximation_order == 2:
+                    # Vectorized Hessian
+                    hessian_fn = torch.vmap(torch.func.hessian(model_func))
+                    H_batch = hessian_fn(x_and_u_batch)
+                    H_batch = torch.clamp(H_batch, -1e3, 1e3) # Clip to prevent explosion
+                    H_batch = H_batch.detach().numpy()
+                else:
+                    H_batch = None
+            else:
+                J_batch = None
+                H_batch = None
                 
-                if self.nn_approximation_order >= 1:
-                    try:
-                        # Use torch.autograd.functional.jacobian instead of functorch
-                        def model_func(x):
-                            return self.full_pytorch_model(x)
-                        
-                        jac = jacobian(model_func, x_and_u_sample)
-                        
-                        # Check for NaN/Inf in jacobian
-                        if torch.isnan(jac).any() or torch.isinf(jac).any():
-                            raise ValueError("NaN/Inf in Jacobian")
-                        
-                        # Clip jacobian values to prevent explosion
-                        jac = torch.clamp(jac, -1e3, 1e3)
-                        J_batch[i] = jac.detach().numpy()
-                        
-                    except Exception as jac_e:
-                        print(f"Warning: Jacobian computation failed at sample {i}: {jac_e}, using finite differences")
-                        # Fallback to finite differences
-                        _, J_fd, H_fd = self.compute_finite_differences(x_and_u_sample_np)
-                        J_batch[i] = J_fd
-                        if self.nn_approximation_order == 2 and H_fd is not None:
-                            H_batch[i] = H_fd
-                        continue
-                    
-                    if self.nn_approximation_order == 2:
-                        try:
-                            # Use torch.autograd.functional.hessian
-                            def model_func_hess(x):
-                                # For Hessian, we need a scalar output, so we'll compute for each output dimension
-                                return self.full_pytorch_model(x)
-                            
-                            # Compute Hessian for each output dimension
-                            for out_dim in range(self.n_states):
-                                def scalar_model_func(x):
-                                    return model_func_hess(x)[out_dim]
-                                
-                                hess_out = hessian(scalar_model_func, x_and_u_sample)
-                                
-                                # Check for NaN/Inf
-                                if torch.isnan(hess_out).any() or torch.isinf(hess_out).any():
-                                    hess_out = torch.zeros_like(hess_out)
-                                
-                                # Apply regularization for numerical stability
-                                hessian_regularization = 1e-6
-                                input_dim = x_and_u_sample.shape[0]
-                                hess_out_reg = hess_out + hessian_regularization * torch.eye(input_dim)
-                                
-                                # Check condition number
-                                try:
-                                    eigenvals = torch.linalg.eigvals(hess_out_reg)
-                                    max_eigval = torch.max(torch.real(eigenvals))
-                                    min_eigval = torch.min(torch.real(eigenvals))
-                                    
-                                    if min_eigval > 0:
-                                        condition_number = max_eigval / min_eigval
-                                        if condition_number > 1e6:  # Too ill-conditioned
-                                            hess_out = torch.zeros_like(hess_out)
-                                        else:
-                                            hess_out = hess_out_reg
-                                    else:
-                                        hess_out = torch.zeros_like(hess_out)
-                                except:
-                                    hess_out = torch.zeros_like(hess_out)
-                                
-                                # Final clipping
-                                hess_out = torch.clamp(hess_out, -1e3, 1e3)
-                                H_batch[i, out_dim] = hess_out.detach().numpy()
-                                
-                        except Exception as hess_e:
-                            print(f"Warning: Hessian computation failed at sample {i}: {hess_e}, using finite differences")
-                            # Fallback to finite differences
-                            _, _, H_fd = self.compute_finite_differences(x_and_u_sample_np)
-                            if H_fd is not None:
-                                H_batch[i] = H_fd
-                            
-            except Exception as e:
-                print(f"Warning: All derivative computations failed at sample {i}: {e}, using finite differences")
-                # Ultimate fallback to finite differences
-                y_pred_fd, J_fd, H_fd = self.compute_finite_differences(x_and_u_sample_np)
-                y_pred_batch[i] = y_pred_fd
-                if self.nn_approximation_order >= 1:
-                    J_batch[i] = J_fd
-                if self.nn_approximation_order == 2 and H_fd is not None:
-                    H_batch[i] = H_fd
+        except Exception as e:
+            print(f"Error during batch computation: {e}")
 
-        if self.nn_approximation_order == 2:
-            return y_pred_batch, J_batch, H_batch
-        elif self.nn_approximation_order == 1:
-            return y_pred_batch, J_batch, None
-        else:
-            return y_pred_batch, None, None
-    
+        return y_pred_batch, J_batch, H_batch
+
     def compute_terminal_cost_matrix(self, A, B, Q, R):
         """Compute the terminal cost matrix P by solving DARE"""
         try:
@@ -452,45 +316,32 @@ class MPCController:
             with torch.no_grad():
                 model_input_torch = torch.from_numpy(model_input_k).float()
                 x_next = self.full_pytorch_model(model_input_torch).numpy()
-                
-                # Safety check for the rollout
-                if np.isnan(x_next).any() or np.isinf(x_next).any():
-                    print(f"Warning: NaN/Inf in trajectory rollout at step {k}, using previous state")
-                    x_next = x_guess_np[k, :]
-                elif np.abs(x_next).max() > 1e4:
-                    print(f"Warning: Explosive values in trajectory rollout at step {k}, clipping")
-                    x_next = np.clip(x_next, -1e4, 1e4)
-                
                 x_guess_np[k+1, :] = x_next
 
         # Get predictions and derivatives based on approximation order
-        if self.nn_approximation_order == 2:
-            y_pred_batch, J_batch, H_batch = self.get_batch_predictions_and_derivatives(x_guess_np, self.u_guess.T)
-        else:
-            y_pred_batch, J_batch, _ = self.get_batch_predictions_and_derivatives(x_guess_np, self.u_guess.T)
+        y_pred_batch, J_batch, H_batch = self.get_batch_predictions_and_derivatives(x_guess_np, self.u_guess.T)
         
-        # Set the parameters for the optimizer with additional safety checks
+        # Set the parameters for the optimizer
         for k in range(MPCConfig.N):
             if self.nn_approximation_order >= 1:
                 J_k = J_batch[k]
                 B_k = J_k[:, :self.n_controls]  # First 4 columns for torque inputs
                 A_k = J_k[:, self.n_controls:self.n_controls+self.n_states]  # Next 6 columns for states
-                
-                # Safety check for linearization matrices
-                if np.isnan(A_k).any() or np.isnan(B_k).any() or np.isinf(A_k).any() or np.isinf(B_k).any():
-                    print(f"Warning: NaN/Inf in linearization matrices at step {k}, using identity")
-                    A_k = np.eye(self.n_states)
-                    B_k = np.zeros((self.n_states, self.n_controls))
-                
-                # Additional check for explosive values
-                if np.abs(A_k).max() > 1e3 or np.abs(B_k).max() > 1e3:
-                    print(f"Warning: Explosive values in linearization matrices at step {k}, clipping")
-                    A_k = np.clip(A_k, -1e3, 1e3)
-                    B_k = np.clip(B_k, -1e3, 1e3)
-                
                 C_k = y_pred_batch[k] - A_k @ x_guess_np[k] - B_k @ self.u_guess[:, k]
                 
-                # Safety check for C_k
+                # Safety checks
+                if np.isnan(A_k).any() or np.isinf(A_k).any():
+                    print(f"Warning: NaN/Inf in A matrix at step {k}, using identity")
+                    A_k = np.eye(self.n_states)
+                elif np.abs(A_k).max() > 1e3:
+                    print(f"Warning: Explosive values in A matrix at step {k}, clipping")
+                    A_k = np.clip(A_k, -1e3, 1e3)       
+                if np.isnan(B_k).any() or np.isinf(B_k).any():
+                    print(f"Warning: NaN/Inf in B matrix at step {k}, using zero")
+                    B_k = np.zeros_like(B_k)
+                elif np.abs(B_k).max() > 1e3:
+                    print(f"Warning: Explosive values in B matrix at step {k}, clipping")
+                    B_k = np.clip(B_k, -1e3, 1e3)
                 if np.isnan(C_k).any() or np.isinf(C_k).any():
                     print(f"Warning: NaN/Inf in C matrix at step {k}, using zero")
                     C_k = np.zeros_like(C_k)
@@ -523,31 +374,13 @@ class MPCController:
         if self.nn_approximation_order >= 1:
             A_terminal = J_batch[-1][:, self.n_controls:self.n_controls+self.n_states]
             B_terminal = J_batch[-1][:, :self.n_controls]
-            
-            # Safety check for terminal matrices
-            if np.isnan(A_terminal).any() or np.isnan(B_terminal).any() or np.isinf(A_terminal).any() or np.isinf(B_terminal).any():
-                print("Warning: NaN/Inf in terminal matrices, using identity")
-                A_terminal = np.eye(self.n_states)
-                B_terminal = np.zeros((self.n_states, self.n_controls))
         else:
             # Fallback to identity matrices if no linearization
             A_terminal = np.eye(self.n_states)
             B_terminal = np.zeros((self.n_states, self.n_controls))
         
         # Compute terminal cost matrix P by solving DARE with safety
-        try:
-            P_matrix, _ = self.compute_terminal_cost_matrix(A_terminal, B_terminal, self.Q_np, self.R_np)
-            
-            # Safety check for P matrix
-            if np.isnan(P_matrix).any() or np.isinf(P_matrix).any():
-                print("Warning: NaN/Inf in terminal cost matrix, using Q")
-                P_matrix = self.Q_np
-            elif np.abs(P_matrix).max() > 1e6:
-                print("Warning: Explosive values in terminal cost matrix, scaling down")
-                P_matrix = P_matrix / np.abs(P_matrix).max() * 1e3
-        except Exception as e:
-            print(f"Warning: Exception in terminal cost computation: {e}, using Q")
-            P_matrix = self.Q_np
+        P_matrix, _ = self.compute_terminal_cost_matrix(A_terminal, B_terminal, self.Q_np, self.R_np)
         
         # Multiply by a gain
         P_matrix *= MPCConfig.LAMBDA 
@@ -632,23 +465,12 @@ class MPCController:
         plot_path = f'results/mpc_casadi_sim_order_{self.nn_approximation_order}.png'
         plt.savefig(plot_path)
         print(f"\nMPC trajectory plot saved as '{plot_path}'.")
-    
-    def print_timing_stats(self, start, end, sim_times, n_steps):
-        """Print timing statistics"""
-        total_sim_time = sum(sim_times)
-        mpc_time = end - start - total_sim_time
-        print(f"\nSimulated {MPCConfig.SIM_TIME:.1f}s in {end - start:.2f} seconds")
-        print(f"Total simulation time: {total_sim_time:.2f} seconds.")
-        print(f"Avg simulation time per step: {1000 * total_sim_time / n_steps:.2f} ms.")
-        print(f"Total MPC time: {mpc_time:.2f} seconds")
-        print(f"Avg MPC time per step: {1000 * mpc_time / n_steps:.2f} ms.")
-    
+        
 def run_mpc_simulation(mode = 'spr', nn_approximation_order=1):
     """Main function to run MPC simulation"""
     # Initialize MPC controller
     mpc = MPCController(nn_approximation_order=nn_approximation_order)
     
-    # --- Phase 3: The Simulation Loop ---
     print("--- Starting MPC simulation ---")
     
     # Sample initial and target states from the simulation data
@@ -670,7 +492,6 @@ def run_mpc_simulation(mode = 'spr', nn_approximation_order=1):
 
     start = time.time()
     for i in range(n_steps):
-
         if mode == 'tt':
             # Get next target state from the reference trajectory
             if ref_index < len(reference_trajectory):
@@ -718,4 +539,4 @@ def run_mpc_simulation(mode = 'spr', nn_approximation_order=1):
 if __name__ == "__main__":
     mode = 'spr' # set point regulation
     # mode = 'tt' # trajectory tracking
-    run_mpc_simulation(mode=mode, nn_approximation_order=1)
+    run_mpc_simulation(mode=mode, nn_approximation_order=2)

@@ -143,7 +143,7 @@ def main():
     
     if CONTROL_MODE == "vlm":
         # Initialize VLM for user input (set text_only_mode=False to enable images)
-        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], text_only_mode=True)
+        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], text_only_mode=False)
         
         # Check if VLM server is running
         if not vlm.check_server():
