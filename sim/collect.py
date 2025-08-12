@@ -16,7 +16,26 @@ from src.Sim import Sim
 # Set path for FFMPEG for saving video animations
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 matplotlib.rcParams["animation.ffmpeg_path"] = ffmpeg_path
-matplotlib.use('Qt5Agg')  # Use interactive backend
+
+# Try to set a working interactive backend, fallback to non-interactive if needed
+def set_matplotlib_backend():
+    backends_to_try = ['TkAgg', 'Qt5Agg', 'QtAgg', 'Agg']  # Agg is non-interactive fallback
+    
+    for backend in backends_to_try:
+        try:
+            matplotlib.use(backend)
+            print(f"Successfully set matplotlib backend to: {backend}")
+            return backend
+        except Exception as e:
+            print(f"Failed to set backend {backend}: {e}")
+            continue
+    
+    # If all backends fail, use Agg (non-interactive)
+    matplotlib.use('Agg')
+    print("Warning: Using non-interactive backend 'Agg'. Plots will be saved but not displayed.")
+    return 'Agg'
+
+current_backend = set_matplotlib_backend()
 
 # Simulation settings
 SAVE_RESULTS = True

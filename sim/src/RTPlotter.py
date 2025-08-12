@@ -173,7 +173,6 @@ class RTPlotter:
             # Mark trajectory as started when we first get a target
             if not self.trajectory_started:
                 self.trajectory_started = True
-                print(f"Trajectory visualization started from tip: [{self.start_tip_position[0]:.3f}, {self.start_tip_position[1]:.3f}, {self.start_tip_position[2]:.3f}]")
         
         # Update rod visualizations
         for i, rod in enumerate(self.rods):

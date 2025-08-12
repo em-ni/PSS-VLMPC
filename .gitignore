@@ -17,3 +17,4 @@ generic-neural-mpc/data/*.pth
 sim/frames*
 sim/*.mp4
 sim/results*
+sim/.env

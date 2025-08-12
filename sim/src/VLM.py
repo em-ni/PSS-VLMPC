@@ -10,28 +10,71 @@ import matplotlib.patches as patches
 from io import BytesIO
 import base64
 import time
+import os
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
 """
+For Llama.cpp:
 brew install llama.cpp
 llama-server -hf ggml-org/SmolVLM-500M-Instruct-GGUF -ngl 99 --port 8080
+
+For Gemini:
+pip install google-genai python-dotenv
+Add G_API_KEY=your-api-key to .env file
 """
 
 class VLM:
-    def __init__(self, server_url="http://localhost:8080", vlm_dt=1.0, mpc_dt=0.02, text_only_mode=False):
+    def __init__(self, server_url="http://localhost:8080", vlm_dt=1.0, mpc_dt=0.02, 
+                 text_only_mode=False, backend="llama", model_name="gemini-2.5-pro"):
         """
         Vision Language Model interface for dynamic target assignment.
         
         Args:
-            server_url (str): URL of the llama.cpp server
+            server_url (str): URL of the llama.cpp server (for backend="llama")
             vlm_dt (float): VLM update frequency in seconds
             mpc_dt (float): MPC update frequency in seconds
             text_only_mode (bool): If True, skip image generation for debugging
+            backend (str): "llama" for llama.cpp server or "gemini" for Google Gemini
+            model_name (str): Model name (for Gemini: "gemini-2.5-pro" or "gemini-2.5-flash")
         """
         self.server_url = server_url
         self.vlm_dt = vlm_dt
         self.mpc_dt = mpc_dt
-        self.session = requests.Session()
         self.text_only_mode = text_only_mode
+        self.backend = backend.lower()
+        self.model_name = model_name
+        
+        # Initialize default attributes first (before any potential exceptions)
+        self.session = None
+        self.gemini_client = None
+        self.user_input_queue = Queue()
+        self.input_thread = None
+        self.running = False
+        
+        # Initialize backend-specific clients
+        if self.backend == "llama":
+            self.session = requests.Session()
+        elif self.backend == "gemini":
+            # Look for .env file in current directory and parent directories
+            env_paths = [
+                '.env',
+                '../.env', 
+                '../../.env',
+                os.path.join(os.path.dirname(__file__), '..', '.env'),
+                os.path.join(os.path.dirname(__file__), '..', '..', '.env')
+            ]
+            
+            for env_path in env_paths:
+                if os.path.exists(env_path):
+                    load_dotenv(env_path)
+                    break
+            
+            os.environ['GOOGLE_API_KEY'] = os.getenv('G_API_KEY')
+            self.gemini_client = genai.Client()
+        else:
+            raise ValueError(f"Unsupported backend: {backend}. Use 'llama' or 'gemini'")
         
         # Predefined targets
         self.targets = {
@@ -49,16 +92,11 @@ class VLM:
         self.last_response = "VLM initialized. Type commands like 'go right', 'move left', etc."
         self.current_scene_image = None  # Store the latest scene image
         
-        # Input handling
-        self.user_input_queue = Queue()
-        self.input_thread = None
-        self.running = False
-        
         # Visualization parameters for scene reconstruction
-        self.xlim = (-1.5, 1.5)
-        self.ylim = (-1.5, 1.5)
-        self.zlim = (-1.5, 1.5)
-        self.colors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan', 'magenta']
+        self.xlim = (-1.0, 1.0)
+        self.ylim = (-1.0, 1.0)
+        self.zlim = (-1.0, 1.0)
+        self.colors = ['red', 'blue', 'orange', 'purple']
         
         # System prompt for the VLM
         if self.text_only_mode:
@@ -85,41 +123,46 @@ Examples:
 
 Just the word, nothing else."""
         else:
-            self.system_prompt = """You are a robot controller. You see an image showing a robot system.
-
-In the image:
-- Red/Blue lines = Robot segments
-- Red circle = Robot tip (current position)
-- Green circle = Target position
-- Dashed line = Distance to target
-
-Respond with EXACTLY ONE WORD based on the user command:
-
-Valid responses:
-right
-left  
-up
-down
-center
-stop
+            self.system_prompt = """You are a soft robot controller, your goal is to assign the 2D coordinates of the target, where the tip of the robot will be steered after your output. You see the XY plane of the robot's workspace, you can see the robot tip colored in as a black dot, and the current target colored as a green dot. You are able to assign the position of the latter, and the tip possiotn will be controlled to follow the target. Respond with EXACTLY with two numbers separated by a comma.
+You have to understand the user intention, and output the target position in the XY plane WITHIN the workspace limits. For example the use might want the robot to touch a certain object in the workspace, or to move to a certain position, or to move in a certain direction. 
+Possible examples:
+"touch the green circle" → 0.5,0.5 (coordinates of the green circle you deduced from the image)
+"move right" → 0.5,0.0 (you deduce the tip position is at (0,0) and you set the target to (0.5,0))
+"avoid the yellow square" → 0.0,-0.5 (you deduce the yellow square is at (0, -0.5), you see the tip is close to it and you set the target away from it (0, 0.5))
 
 CRITICAL RULES:
 - NO quotes, NO periods, NO punctuation
-- NO descriptions of the image
-- ONLY respond with one word from the list above
-
-Examples:
-"go right" → right
-"move to target" → (look at image and decide direction)
-"unclear" → stop"""
+- NO explanations or descriptions
+- ONLY the two numbers separated by a comma
+- The numbers must be within the workspace limits: X in [-1.0, 1.0], Y in [-1.0, 1.0]
+- The first number is the X coordinate, the second number is the Y coordinate
+- Do not add anything else
+"""
 
     def check_server(self):
-        """Check if the llama.cpp server is running."""
-        try:
-            response = self.session.get(f"{self.server_url}/health", timeout=5)
-            return response.status_code == 200
-        except:
-            return False
+        """Check if the backend is available."""
+        if self.backend == "llama":
+            try:
+                response = self.session.get(f"{self.server_url}/health", timeout=5)
+                return response.status_code == 200
+            except:
+                return False
+        elif self.backend == "gemini":
+            try:
+                # Only try connection test if we have a valid client
+                if self.gemini_client is None:
+                    return False
+                    
+                # Simple test to check if Gemini is accessible
+                test_response = self.gemini_client.models.generate_content(
+                    model=self.model_name,
+                    contents=["Test connection"],
+                )
+                return True
+            except Exception as e:
+                print(f"Gemini connection test failed: {e}")
+                return False
+        return False
 
     def ingest_info(self, sim_data, current_target=None, tip_history=None, target_history=None):
         """
@@ -147,79 +190,33 @@ Examples:
             # Create a simpler, single view figure for better VLM understanding
             fig = plt.figure(figsize=(8, 6))
             ax = fig.add_subplot(111)
-            
             ax.set_xlim(self.xlim)
-            ax.set_ylim(self.zlim)  # Use Z axis for vertical movement
-            ax.set_xlabel('X Position (m)', fontsize=14)
-            ax.set_ylabel('Z Position (m)', fontsize=14)  
-            ax.set_title('Robot Control View - XZ Plane', fontsize=16, fontweight='bold')
-            ax.set_aspect('equal')
-            ax.grid(True, alpha=0.3)
+            ax.set_ylim(self.ylim)
+            ax.set_aspect('equal', adjustable='box')
+            ax.set_title("Robot Workspace Scene XY View")
+            ax.set_xlabel("X Position")
+            ax.set_ylabel("Y Position")
+            ax.grid(True)
             
-            # Plot robot rods in XZ plane (side view)
-            for i, rod in enumerate(rods):
-                color = self.colors[i % len(self.colors)]
-                pos = rod.position_collection
-                
-                # XZ view (side view)
-                ax.plot(pos[0, :], pos[2, :], color=color, linewidth=4, 
-                       marker='o', markersize=4, label=f'Robot Segment {i+1}')
+            # Plot robot tip position in black
+            current_tip = rods[-1].position_collection[:,-1]
+            ax.plot(current_tip[0], current_tip[1], 'ko', markersize=10, 
+                   markeredgecolor='black', markeredgewidth=2, label='ROBOT TIP', zorder=5)
             
-            # Get current tip position
-            current_tip = None
-            if len(rods) > 0:
-                current_tip = rods[-1].position_collection[:, -1]
-                
-                # Highlight tip with larger marker
-                ax.plot(current_tip[0], current_tip[2], 'ro', markersize=12, 
-                       markeredgecolor='darkred', markeredgewidth=2, 
-                       label='ROBOT TIP', zorder=10)
-            
-            # Plot current target if provided
+            # Plot current target position in green
             if current_target is not None:
-                ax.plot(current_target[0], current_target[2], 'go', markersize=15, 
-                       markeredgecolor='darkgreen', markeredgewidth=3, 
-                       label='TARGET', zorder=10)
+                ax.plot(current_target[0], current_target[1], 'go', markersize=10, 
+                       markeredgecolor='black', markeredgewidth=2, label='CURRENT TARGET', zorder=5)
+            else:
+                current_target = np.array([0.0, 0.0])
                 
-                # Draw connection line between tip and target
-                if current_tip is not None:
-                    ax.plot([current_tip[0], current_target[0]], [current_tip[2], current_target[2]], 
-                           'k--', linewidth=3, alpha=0.8, label='Distance')
-                    
-                    # Calculate and display distance prominently
-                    distance = np.linalg.norm(current_tip - current_target)
-                    ax.text(0.05, 0.95, f'Distance to Target: {distance:.3f}m', 
-                           transform=ax.transAxes, fontsize=12, fontweight='bold',
-                           verticalalignment='top', 
-                           bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.8))
-                    
-                    # Show direction arrow
-                    dx = current_target[0] - current_tip[0]
-                    dz = current_target[2] - current_tip[2]
-                    if abs(dx) > 0.01 or abs(dz) > 0.01:  # Only show if there's meaningful distance
-                        ax.annotate('', xy=(current_target[0], current_target[2]), 
-                                   xytext=(current_tip[0], current_tip[2]),
-                                   arrowprops=dict(arrowstyle='->', lw=3, color='purple', alpha=0.8))
-            
-            # Plot tip trajectory history (simplified)
-            if tip_history and len(tip_history) > 1:
-                tip_hist = np.array(tip_history)
-                ax.plot(tip_hist[:, 0], tip_hist[:, 2], 'b-', linewidth=2, alpha=0.6, 
-                       label='Tip Path')
-            
-            # Add movement direction indicators
-            ax.text(0.8, 0.8, 'RIGHT →', transform=ax.transAxes, fontsize=10, ha='center',
-                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
-            ax.text(0.2, 0.8, '← LEFT', transform=ax.transAxes, fontsize=10, ha='center',
-                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
-            ax.text(0.5, 0.9, '↑ UP', transform=ax.transAxes, fontsize=10, ha='center',
-                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
-            ax.text(0.5, 0.1, '↓ DOWN', transform=ax.transAxes, fontsize=10, ha='center',
-                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
-            
-            # Add legend
-            ax.legend(loc='upper left', fontsize=10)
-            
+            # Plot the predefined targets as dots of different colors except black and green
+            for i, (name, target) in enumerate(self.targets.items()):
+                if name not in ['right', 'left', 'up', 'down', 'center']:
+                    continue
+                ax.plot(target[0], target[1], 'o', color=self.colors[i % len(self.colors)],
+                       markersize=8, label=f'Target: {name.upper()}', zorder=4)
+
             plt.tight_layout()
             
             # Convert to base64 encoded image
@@ -246,75 +243,10 @@ Examples:
             
         self.processing = True
         try:
-            # Prepare the message content
-            messages = [
-                {"role": "system", "content": self.system_prompt}
-            ]
-            
-            # Create user message with text and optional image
-            user_message = {"role": "user", "content": []}
-            
-            # Add text content
-            user_message["content"].append({
-                "type": "text",
-                "text": user_input
-            })
-            
-            # Add image if provided
-            if scene_image or self.current_scene_image:
-                image_data = scene_image or self.current_scene_image
-                user_message["content"].append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{image_data}"
-                    }
-                })
-            
-            messages.append(user_message)
-            
-            payload = {
-                "model": "gpt-4-vision-preview",  # This is just for compatibility
-                "max_tokens": 10,  # Reduced to force shorter responses
-                "temperature": 0.1,  # Lower temperature for more consistent responses
-                "messages": messages
-            }
-            
-            print(f"Sending VLM query: '{user_input}' with {'image' if (scene_image or self.current_scene_image) else 'text only'}")
-            
-            response = self.session.post(
-                f"{self.server_url}/v1/chat/completions", 
-                json=payload, 
-                timeout=15  # Slightly longer timeout for image processing
-            )
-            
-            print(f"VLM server response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                raw_result = data["choices"][0]["message"]["content"].strip()
-                
-                print(f"VLM raw response: '{raw_result}'")
-                
-                # Clean up the response - remove quotes, periods, and extra characters
-                cleaned_result = raw_result.lower()
-                cleaned_result = cleaned_result.replace('"', '').replace("'", "")
-                cleaned_result = cleaned_result.replace('.', '').replace(',', '').replace('!', '').replace('?', '')
-                cleaned_result = cleaned_result.strip()
-                
-                # Extract only the first word if response is too long
-                first_word = cleaned_result.split()[0] if cleaned_result.split() else cleaned_result
-                
-                print(f"VLM cleaned response: '{first_word}'")
-                
-                image_info = " (with image)" if (scene_image or self.current_scene_image) else " (text only)"
-                self.last_response = f"VLM response: '{first_word}' from input: '{user_input}'{image_info}"
-                return first_word
-            else:
-                error_msg = f"Server error {response.status_code}: {response.text}"
-                print(f"VLM server error: {error_msg}")
-                self.last_response = error_msg
-                return None
-                
+            if self.backend == "llama":
+                return self._query_llama(user_input, scene_image)
+            elif self.backend == "gemini":
+                return self._query_gemini(user_input, scene_image)
         except Exception as e:
             error_msg = f"VLM Error: {str(e)}"
             print(f"VLM exception: {error_msg}")
@@ -322,6 +254,150 @@ Examples:
             return None
         finally:
             self.processing = False
+
+    def _query_llama(self, user_input, scene_image=None):
+        """Query Llama.cpp server."""
+        # Prepare the message content
+        messages = [
+            {"role": "system", "content": self.system_prompt}
+        ]
+        
+        # Create user message with text and optional image
+        user_message = {"role": "user", "content": []}
+        
+        # Add text content
+        user_message["content"].append({
+            "type": "text",
+            "text": user_input
+        })
+        
+        # Add image if provided
+        if scene_image or self.current_scene_image:
+            image_data = scene_image or self.current_scene_image
+            user_message["content"].append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{image_data}"
+                }
+            })
+        
+        messages.append(user_message)
+        
+        payload = {
+            "model": "gpt-4-vision-preview",  # This is just for compatibility
+            "max_tokens": 10,  # Reduced to force shorter responses
+            "temperature": 0.1,  # Lower temperature for more consistent responses
+            "messages": messages
+        }
+        
+        print(f"Sending Llama VLM query: '{user_input}' with {'image' if (scene_image or self.current_scene_image) else 'text only'}")
+        
+        response = self.session.post(
+            f"{self.server_url}/v1/chat/completions", 
+            json=payload, 
+            timeout=15  # Slightly longer timeout for image processing
+        )
+        
+        print(f"Llama server response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            raw_result = data["choices"][0]["message"]["content"].strip()
+            
+            print(f"Llama raw response: '{raw_result}'")
+            
+            # Clean up the response - remove quotes, periods, and extra characters
+            cleaned_result = raw_result.lower()
+            cleaned_result = cleaned_result.replace('"', '').replace("'", "")
+            cleaned_result = cleaned_result.replace('.', '').replace(',', '').replace('!', '').replace('?', '')
+            cleaned_result = cleaned_result.strip()
+            
+            # Extract only the first word if response is too long
+            first_word = cleaned_result.split()[0] if cleaned_result.split() else cleaned_result
+            
+            print(f"Llama cleaned response: '{first_word}'")
+            
+            image_info = " (with image)" if (scene_image or self.current_scene_image) else " (text only)"
+            self.last_response = f"Llama response: '{first_word}' from input: '{user_input}'{image_info}"
+            return first_word
+        else:
+            error_msg = f"Llama server error {response.status_code}: {response.text}"
+            print(f"Llama server error: {error_msg}")
+            self.last_response = error_msg
+            return None
+
+    def _query_gemini(self, user_input, scene_image=None):
+        """Query Google Gemini. Return target coordinates as a string: x,y"""
+        print(f"Sending Gemini query: '{user_input}' with {'image' if (scene_image or self.current_scene_image) else 'text only'}")
+        
+        # Prepare contents for Gemini
+        contents = []
+        
+        # Add system instruction through the user prompt for now
+        # (Gemini has system instructions but this approach is simpler)
+        full_prompt = f"{self.system_prompt}\n\nUser command: {user_input}"
+        contents.append(full_prompt)
+        
+        # Add image if provided and not in text-only mode
+        if not self.text_only_mode and (scene_image or self.current_scene_image):
+            image_data = scene_image or self.current_scene_image
+            
+            # Convert base64 to bytes for Gemini
+            try:
+                image_bytes = base64.b64decode(image_data)
+                image_part = types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type='image/png'
+                )
+                contents.append(image_part)
+            except Exception as e:
+                print(f"Error processing image for Gemini: {e}")
+                # Continue without image
+        
+        try:
+            response = self.gemini_client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+            )
+            self.last_response = response.text
+            raw_result = response.text
+            print(f"Gemini raw response: {raw_result}")
+            
+            # Check if it is in the expected format: x,y
+            # Check if response is in x,y format
+            if ',' in raw_result:
+                try:
+                    # Try to parse as x,y coordinates
+                    parts = raw_result.strip().split(',')
+                    if len(parts) == 2:
+                        x = float(parts[0].strip())
+                        y = float(parts[1].strip())
+                        
+                        # Validate coordinates are within workspace limits
+                        if self.xlim[0] <= x <= self.xlim[1] and self.ylim[0] <= y <= self.ylim[1]:
+                            print(f"Gemini coordinates parsed: ({x}, {y})")
+                            target = f"{x},{y}"
+                        else:
+                            print(f"Coordinates out of bounds: ({x}, {y}), defaulting to center")
+                            target = "0.0,0.0"
+                    else:
+                        print(f"Invalid coordinate format, defaulting to center")
+                        target = "0.0,0.0"
+                except ValueError:
+                    print(f"Could not parse coordinates, defaulting to center")
+                    target = "0.0,0.0"
+            else:
+                # Not right format default to center target
+                print(f"Response not in x,y format: '{raw_result}', defaulting to center")
+                target = "0.0,0.0"
+                
+            return target
+            
+        except Exception as e:
+            error_msg = f"Gemini API error: {str(e)}"
+            print(f"Gemini error: {error_msg}")
+            self.last_response = error_msg
+            return "0.0,0.0"
 
     def generate_trajectory(self, current_state, target_state, transition_time=5.0):
         """
@@ -410,31 +486,61 @@ Examples:
                 return trajectory, "stop"
             
             # Handle movement commands
-            if vlm_response in self.targets:
-                target_state = self.targets[vlm_response]
-                print(f"Moving to: {vlm_response} -> {target_state[:3]}")
-                
-                # Generate trajectory
-                trajectory = self.generate_trajectory(current_state, target_state)
-                self.current_target = vlm_response
-                self.current_trajectory = trajectory
-                
-                return trajectory, vlm_response
+            if self.text_only_mode:
+                # For text-only mode, we expect single-word responses
+                if vlm_response in self.targets:
+                    target_state = self.targets[vlm_response]
+                    print(f"Moving to: {vlm_response} -> {target_state[:3]}")
+                    
+                    # Generate trajectory
+                    trajectory = self.generate_trajectory(current_state, target_state)
+                    self.current_target = vlm_response
+                    self.current_trajectory = trajectory
+                    
+                    return trajectory, vlm_response
+                else:
+                    print(f"Unknown command: '{vlm_response}', trying to extract valid direction...")
+                    
+                    # Try to extract a valid direction from the response
+                    for direction in self.targets.keys():
+                        if direction in vlm_response.lower():
+                            print(f"Extracted direction: {direction}")
+                            target_state = self.targets[direction]
+                            trajectory = self.generate_trajectory(current_state, target_state)
+                            self.current_target = direction
+                            self.current_trajectory = trajectory
+                            return trajectory, direction
+                    
+                    print("No valid direction found, defaulting to stop")
+                    return None, None
             else:
-                print(f"Unknown command: '{vlm_response}', trying to extract valid direction...")
-                
-                # Try to extract a valid direction from the response
-                for direction in self.targets.keys():
-                    if direction in vlm_response.lower():
-                        print(f"Extracted direction: {direction}")
-                        target_state = self.targets[direction]
-                        trajectory = self.generate_trajectory(current_state, target_state)
-                        self.current_target = direction
-                        self.current_trajectory = trajectory
-                        return trajectory, direction
-                
-                print("No valid direction found, defaulting to stop")
-                return None, None
+                # For image mode, we expect coordinates in x,y format
+                try:
+                    coords = vlm_response.split(',')
+                    if len(coords) == 2:
+                        x = float(coords[0].strip())
+                        y = float(coords[1].strip())
+                        
+                        # Validate coordinates
+                        if self.xlim[0] <= x <= self.xlim[1] and self.ylim[0] <= y <= self.ylim[1]:
+                            target_state = np.array([x, y, -0.5, 0.0, 0.0, 0.0])  # Z and velocities are zero
+                            print(f"Moving to coordinates: ({x}, {y})")
+                            
+                            # Generate trajectory
+                            trajectory = self.generate_trajectory(current_state, target_state)
+                            self.current_target = f"{x},{y}"
+                            self.current_trajectory = trajectory
+                            
+                            return trajectory, f"{x},{y}"
+                        else:
+                            print(f"Coordinates out of bounds: ({x}, {y}), defaulting to center")
+                            return None, None
+                    else:
+                        print(f"Invalid coordinate format: '{vlm_response}', defaulting to center")
+                        return None, None
+                except ValueError:
+                    print(f"Could not parse coordinates from response: '{vlm_response}', defaulting to center")
+                    return None, None
                 
         except Empty:
             # No new input
@@ -476,6 +582,8 @@ Examples:
             'processing': self.processing,
             'current_target': self.current_target,
             'last_response': self.last_response,
+            'backend': self.backend,
+            'model_name': self.model_name if self.backend == "gemini" else "llama.cpp",
             'server_connected': self.check_server(),
             'queue_size': self.user_input_queue.qsize()
         }
@@ -483,10 +591,17 @@ Examples:
     def stop(self):
         """Stop the VLM and cleanup."""
         self.running = False
-        if self.input_thread and self.input_thread.is_alive():
+        if hasattr(self, 'input_thread') and self.input_thread and self.input_thread.is_alive():
             self.input_thread.join(timeout=1.0)
         print("VLM stopped")
 
     def __del__(self):
         """Cleanup when object is destroyed."""
-        self.stop()
+        try:
+            self.stop()
+        except Exception:
+            # Ignore errors during cleanup
+            pass
+
+
+    

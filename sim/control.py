@@ -1,18 +1,4 @@
 # control.py
-# 
-# VLM Visual Control Integration:
-# The VLM now receives visual context from the simulation, including:
-# - Multi-view robot visualization (XY, XZ, 3D)
-# - Current robot tip position and trajectory history
-# - Target position and trajectory history  
-# - Distance visualization between tip and target
-#
-# To use visual VLM control:
-# 1. Start VLM server: ./llama-server -m ./models/smolvlm-500m-instruct-q4_k_m.gguf -ngl 99 --port 8080
-# 2. Set CONTROL_MODE = "vlm" 
-# 3. Run this script and type commands like "go right", "move up", etc.
-# 4. The VLM will see the current scene and respond accordingly
-#
 import sys
 import matplotlib
 import matplotlib.pyplot as plt
@@ -24,6 +10,7 @@ import atexit
 from elastica.timestepper import tqdm
 from examples.MuscularSnake.post_processing import plot_video_with_surface
 import numpy as np
+import time
 
 # Local imports
 from src.RTPlotter import RTPlotter
@@ -39,7 +26,25 @@ from mpc_casadi_sim import MPCController
 # Set path for FFMPEG for saving video animations
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 matplotlib.rcParams["animation.ffmpeg_path"] = ffmpeg_path
-matplotlib.use('Qt5Agg')  # Use interactive backend
+
+# Try to set a working interactive backend, fallback to non-interactive if needed
+def set_matplotlib_backend():
+    backends_to_try = ['TkAgg', 'Qt5Agg', 'QtAgg', 'Agg']  # Agg is non-interactive fallback
+    
+    for backend in backends_to_try:
+        try:
+            matplotlib.use(backend)
+            return backend
+        except Exception as e:
+            print(f"Failed to set backend {backend}: {e}")
+            continue
+    
+    # If all backends fail, use Agg (non-interactive)
+    matplotlib.use('Agg')
+    print("Warning: Using non-interactive backend 'Agg'. Plots will be saved but not displayed.")
+    return 'Agg'
+
+current_backend = set_matplotlib_backend()
 
 # Cleanup function
 def cleanup():
@@ -74,7 +79,7 @@ simulation_params = {
     'max_torque': 9e-2,
     'mpc_dt': 0.02
 }
-vlm_dt = 1.0
+vlm_dt = 2.0
 
 def plot_predictions(y_true, y_pred, save_path):
     """Generates Predicted vs. Actual plots and saves the figure to a file."""
@@ -128,28 +133,32 @@ def main():
     
     # Print simulation info
     sim_info = cc_sim.get_simulation_info()
-    print("\nSimulation Configuration:")
+    print("Simulation Configuration:")
     for key, value in sim_info.items():
         print(f"  {key}: {value}")
         
     # Set real-time plot
     plotter = None
-    if REAL_TIME_PLOT:
-        print("Setting up real-time plotter...")
+    if REAL_TIME_PLOT and current_backend != 'Agg':
+        print("\nSetting up real-time plotter...")
         plotter = RTPlotter(rods_list)
+    elif REAL_TIME_PLOT and current_backend == 'Agg':
+        print("\nWarning: Real-time plotting disabled - using non-interactive backend 'Agg'")
     
     # Initialize MPC controller
+    print("\nInitializing MPC Controller...")
     mpc = MPCController(nn_approximation_order=APPROXIMATION_ORDER)
     
     if CONTROL_MODE == "vlm":
         # Initialize VLM for user input (set text_only_mode=False to enable images)
-        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], text_only_mode=False)
+        print("\nInitializing VLM...")
+        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], text_only_mode=False, backend="gemini", model_name="gemini-2.5-pro")
         
         # Check if VLM server is running
         if not vlm.check_server():
             print("Warning: VLM server not running!")
             print("To use VLM features, start the server with:")
-            print("./llama-server -m ./models/smolvlm-500m-instruct-q4_k_m.gguf -ngl 99 --port 8080")
+            print("llama-server -hf ggml-org/SmolVLM-500M-Instruct-GGUF -ngl 99 --port 8080")
             print("Continuing without VLM control...")
             CONTROL_MODE = 'tt'
         else:
@@ -199,26 +208,29 @@ def main():
     # History variables
     current_control = np.zeros(4)  
     history_x, history_u = [], []
-    state_pred_error_history = []
+    history_state_pred_error = []
     history_x_current_test = []
     history_x_current_pred = []
     history_x_target = []
+    history_mpc_times = []
     
     # VLM visual history for better context
-    tip_position_history = []
-    target_position_history = []
+    history_tip_position = []
+    history_target_position = []
+    history_vlm_times = []
 
     # Run simulation
     total_steps = int(FINAL_TIME / simulation_params['dt'])
     step_skip_mpc = int(simulation_params['mpc_dt'] / simulation_params['dt'])
     step_skip_vlm = int(vlm_dt / simulation_params['dt'])
-    time = 0.0
+    current_time = 0.0
     i = 0
+    print("Type command here to move the robot\n")
     try:
         # main loop
         # for i in tqdm(range(total_steps)):        
         while True:
-            # print(f"\nStep {i}, Time: {time:.2f}s, Target: {x_target[:3]}, Current: {x_current[:3]}", end='\r', flush=True)
+            # print(f"\nStep {i}, Time: {current_time:.2f}s, Target: {x_target[:3]}, Current: {x_current[:3]}", end='\r', flush=True)
             # VLM control updates
             if CONTROL_MODE == 'vlm' and i % step_skip_vlm == 0:
                 # Get current state for VLM
@@ -228,35 +240,38 @@ def main():
                 x_current_vlm = np.array(current_tip_pos_vlm.tolist() + current_tip_vel_vlm.tolist())
                 
                 # Update position histories for VLM context
-                tip_position_history.append(current_tip_pos_vlm.copy())
+                history_tip_position.append(current_tip_pos_vlm.copy())
                 if len(history_x_target) > 0:
-                    target_position_history.append(history_x_target[-1][:3])  # Only position, not velocity
+                    history_target_position.append(history_x_target[-1][:3])  # Only position, not velocity
                 
                 # Generate scene image for VLM (unless in text-only mode)
                 scene_image = None
+                start_vlm_time = time.time()
                 if not vlm.text_only_mode:
                     scene_image = vlm.ingest_info(
                         sim_data=cc_sim,
                         current_target=x_target[:3] if len(history_x_target) > 0 else None,
-                        tip_history=tip_position_history[-50:],  # Last 50 positions for history
-                        target_history=target_position_history[-50:] if target_position_history else None
+                        tip_history=history_tip_position[-50:],  # Last 50 positions for history
+                        target_history=history_target_position[-50:] if history_target_position else None
                     )
+                    
+                # # Save first scene image for debugging
+                # if i == 0 and scene_image is not None:
+                #     vlm.save_scene_image(filename='initial_vlm_view.png')
+                #     print("Initial scene image saved as 'initial_vlm_view.png'")
 
                 # Process VLM input with visual context
                 new_trajectory, target_name = vlm.process_user_input(x_current_vlm, scene_image)
+                end_vlm_time = time.time()
+                history_vlm_times.append(end_vlm_time - start_vlm_time)
                 
                 if new_trajectory is not None:
                     vlm_trajectory = new_trajectory
                     vlm_trajectory_index = 0
-                    print(f"New VLM trajectory activated: {target_name}")
+                    print(f"New VLM trajectory activated to reach: {target_name}\n")
                     
-                    # Optional: Save scene image for debugging (uncomment to enable)
+                    # Save scene image for debugging
                     # vlm.save_scene_image()
-                    
-                    # Print VLM status
-                    status = vlm.get_status()
-                    if i % (step_skip_vlm * 5) == 0:  # Print status less frequently
-                        print(f"VLM Status: {status['last_response']}")
                 
             # Update the MPC controller every step_skip_mpc
             if i % step_skip_mpc == 0:
@@ -267,7 +282,10 @@ def main():
                 x_current_mpc = np.array(current_tip_pos.tolist() + current_tip_vel.tolist())
                 
                 # Get MPC control input
+                start_mpc_time = time.time()
                 u_mpc = mpc.step(x_target, x_current_mpc)
+                end_mpc_time = time.time()
+                history_mpc_times.append(end_mpc_time - start_mpc_time)
                 if u_mpc is None:
                     print(f"MPC failed at step {i}")
                     break
@@ -301,7 +319,7 @@ def main():
             cc_sim.set_torque(1, np.array([current_control[2], current_control[3], 0.0]))
             
             # step sim
-            time = cc_sim.step(time)
+            current_time = cc_sim.step(current_time)
             
             if DEBUG_STATE_PREDICTION:
                 # Save states for plotting
@@ -316,7 +334,7 @@ def main():
 
                     history_x_current_test.append(x_current_test)
                     history_x_current_pred.append(x_current_pred)
-                    state_pred_error_history.append(state_pred_error)
+                    history_state_pred_error.append(state_pred_error)
                     # print(f"\tNN prediction error: {state_pred_error:.4f}")
 
             # Check for numerical instability
@@ -329,11 +347,16 @@ def main():
                     print("Plot window closed, stopping simulation")
                     break
                     
-                plotter.update_plot(time, target_position=x_target[:3])                
+                plotter.update_plot(current_time, target_position=x_target[:3])                
                 
             i += 1
         
         print("Simulation complete!")
+        # Get average MPC and VLM times
+        avg_mpc_time = np.mean(history_mpc_times) if history_mpc_times else 0
+        avg_vlm_time = np.mean(history_vlm_times) if history_vlm_times else 0
+        print(f"Average MPC time: {avg_mpc_time:.6f}s")
+        print(f"Average VLM time: {avg_vlm_time:.6f}s\n")
         
         # Plot results
         mpc.history_x = history_x  # Set for plotting
@@ -362,9 +385,9 @@ def main():
 
     if DEBUG_STATE_PREDICTION:
         # Plot and save the state prediction error history
-        if state_pred_error_history:
+        if history_state_pred_error:
             plt.figure(figsize=(10, 6))
-            plt.plot(state_pred_error_history)
+            plt.plot(history_state_pred_error)
             plt.title('State Prediction Error Over Time')
             plt.xlabel('MPC Step')
             plt.ylabel('Prediction Error (L2 Norm)')
