@@ -125,10 +125,11 @@ def main():
     global CONTROL_MODE
     # init sim
     print("Initializing Constant Curvature Simulation...")
-    cc_sim = Sim(**simulation_params)
+    cc_sim = Sim(**simulation_params, with_targets=True)
     
     # Get simulation components
     rods_list = cc_sim.get_rods()
+    targets_list = cc_sim.get_targets()
     callback_params = cc_sim.get_callback_params()
     
     # Print simulation info
@@ -141,7 +142,7 @@ def main():
     plotter = None
     if REAL_TIME_PLOT and current_backend != 'Agg':
         print("\nSetting up real-time plotter...")
-        plotter = RTPlotter(rods_list)
+        plotter = RTPlotter(rods_list, targets=targets_list)
     elif REAL_TIME_PLOT and current_backend == 'Agg':
         print("\nWarning: Real-time plotting disabled - using non-interactive backend 'Agg'")
     
@@ -150,10 +151,10 @@ def main():
     mpc = MPCController(nn_approximation_order=APPROXIMATION_ORDER)
     
     if CONTROL_MODE == "vlm":
-        # Initialize VLM for user input (set text_only_mode=False to enable images)
+        # Initialize VLM for user input
         print("\nInitializing VLM...")
-        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], text_only_mode=False, backend="gemini", model_name="gemini-2.5-pro")
-        
+        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], backend="gemini", model_name="gemini-2.5-pro")
+
         # Check if VLM server is running
         if not vlm.check_server():
             print("Warning: VLM server not running!")
@@ -163,10 +164,6 @@ def main():
             CONTROL_MODE = 'tt'
         else:
             print("VLM server connected successfully!")
-            if vlm.text_only_mode:
-                print("VLM running in TEXT-ONLY mode for debugging")
-            else:
-                print("VLM running in VISUAL mode with image processing")
             vlm.start_input_thread()
             
         # VLM trajectory variables
@@ -247,18 +244,17 @@ def main():
                 # Generate scene image for VLM (unless in text-only mode)
                 scene_image = None
                 start_vlm_time = time.time()
-                if not vlm.text_only_mode:
-                    scene_image = vlm.ingest_info(
-                        sim_data=cc_sim,
-                        current_target=x_target[:3] if len(history_x_target) > 0 else None,
-                        tip_history=history_tip_position[-50:],  # Last 50 positions for history
-                        target_history=history_target_position[-50:] if history_target_position else None
-                    )
+                scene_image = vlm.ingest_info(
+                    sim_data=cc_sim,
+                    current_target=x_target[:3] if len(history_x_target) > 0 else None,
+                    tip_history=history_tip_position[-50:],  # Last 50 positions for history
+                    target_history=history_target_position[-50:] if history_target_position else None
+                )
                     
-                # # Save first scene image for debugging
-                # if i == 0 and scene_image is not None:
-                #     vlm.save_scene_image(filename='initial_vlm_view.png')
-                #     print("Initial scene image saved as 'initial_vlm_view.png'")
+                # Save first scene image for debugging
+                if i == 0 and scene_image is not None:
+                    vlm.save_scene_image(filename='initial_vlm_view.png')
+                    print("Initial scene image saved as 'initial_vlm_view.png'")
 
                 # Process VLM input with visual context
                 new_trajectory, target_name = vlm.process_user_input(x_current_vlm, scene_image)

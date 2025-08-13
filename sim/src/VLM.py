@@ -26,8 +26,7 @@ Add G_API_KEY=your-api-key to .env file
 """
 
 class VLM:
-    def __init__(self, server_url="http://localhost:8080", vlm_dt=1.0, mpc_dt=0.02, 
-                 text_only_mode=False, backend="llama", model_name="gemini-2.5-pro"):
+    def __init__(self, server_url="http://localhost:8080", vlm_dt=1.0, mpc_dt=0.02, backend="llama", model_name="gemini-2.5-pro"):
         """
         Vision Language Model interface for dynamic target assignment.
         
@@ -35,14 +34,12 @@ class VLM:
             server_url (str): URL of the llama.cpp server (for backend="llama")
             vlm_dt (float): VLM update frequency in seconds
             mpc_dt (float): MPC update frequency in seconds
-            text_only_mode (bool): If True, skip image generation for debugging
             backend (str): "llama" for llama.cpp server or "gemini" for Google Gemini
             model_name (str): Model name (for Gemini: "gemini-2.5-pro" or "gemini-2.5-flash")
         """
         self.server_url = server_url
         self.vlm_dt = vlm_dt
         self.mpc_dt = mpc_dt
-        self.text_only_mode = text_only_mode
         self.backend = backend.lower()
         self.model_name = model_name
         
@@ -99,34 +96,10 @@ class VLM:
         self.colors = ['red', 'blue', 'orange', 'purple']
         
         # System prompt for the VLM
-        if self.text_only_mode:
-            self.system_prompt = """You are a robot controller. Respond with EXACTLY ONE WORD.
-
-Valid responses:
-right
-left
-up
-down
-center
-stop
-
-CRITICAL RULES:
-- NO quotes, NO periods, NO punctuation
-- NO explanations or descriptions
-- ONLY one word from the list above
-- Do not add anything else
-
-Examples:
-"go right" → right
-"move up" → up
-"unclear" → stop
-
-Just the word, nothing else."""
-        else:
-            self.system_prompt = """You are a soft robot controller, your goal is to assign the 2D coordinates of the target, where the tip of the robot will be steered after your output. You see the XY plane of the robot's workspace, you can see the robot tip colored in as a black dot, and the current target colored as a green dot. You are able to assign the position of the latter, and the tip possiotn will be controlled to follow the target. Respond with EXACTLY with two numbers separated by a comma.
+        self.system_prompt = """You are a soft robot controller, your goal is to assign the 2D coordinates of the target, where the tip of the robot will be steered after your output. You see the XY plane of the robot's workspace, you can see the robot tip colored in as a black dot, and the current target colored as a green dot. You are able to assign the position of the latter, and the tip possiotn will be controlled to follow the target. Respond with EXACTLY with two numbers separated by a comma.
 You have to understand the user intention, and output the target position in the XY plane WITHIN the workspace limits. For example the use might want the robot to touch a certain object in the workspace, or to move to a certain position, or to move in a certain direction. 
 Possible examples:
-"touch the green circle" → 0.5,0.5 (coordinates of the green circle you deduced from the image)
+"touch the red circle" → 0.5,0.5 (coordinates of the red circle you deduced from the image)
 "move right" → 0.5,0.0 (you deduce the tip position is at (0,0) and you set the target to (0.5,0))
 "avoid the yellow square" → 0.0,-0.5 (you deduce the yellow square is at (0, -0.5), you see the tip is close to it and you set the target away from it (0, 0.5))
 
@@ -169,7 +142,7 @@ CRITICAL RULES:
         Create visual representation of the current scene for VLM processing.
         
         Args:
-            sim_data: Simulation object or rods data
+            sim_data: Simulation object
             current_target (np.array): Current target position [x, y, z]
             tip_history (list): History of tip positions
             target_history (list): History of target positions
@@ -209,13 +182,28 @@ CRITICAL RULES:
                        markeredgecolor='black', markeredgewidth=2, label='CURRENT TARGET', zorder=5)
             else:
                 current_target = np.array([0.0, 0.0])
-                
-            # Plot the predefined targets as dots of different colors except black and green
-            for i, (name, target) in enumerate(self.targets.items()):
-                if name not in ['right', 'left', 'up', 'down', 'center']:
-                    continue
-                ax.plot(target[0], target[1], 'o', color=self.colors[i % len(self.colors)],
-                       markersize=8, label=f'Target: {name.upper()}', zorder=4)
+            
+            # Extract and plot targets directly from simulation
+            if hasattr(sim_data, 'get_targets'):
+                sim_targets = sim_data.get_targets()
+                for target in sim_targets:
+                    # Get target position
+                    if hasattr(target, 'position_collection'):
+                        if target.position_collection.ndim == 1:
+                            target_pos = target.position_collection
+                        else:
+                            target_pos = target.position_collection[:, 0]
+                    else:
+                        continue  # Skip if no position data
+                    
+                    # Get target color (use the stored target_color attribute)
+                    target_color = getattr(target, 'target_color', 'gray')
+                    target_id = getattr(target, 'target_id', 'unknown')
+                    
+                    # Plot the target with its correct color
+                    ax.plot(target_pos[0], target_pos[1], 'o', color=target_color,
+                           markersize=8, markeredgecolor='black', markeredgewidth=1,
+                           label=f'Target {target_id}: {target_color.upper()}', zorder=4)
 
             plt.tight_layout()
             
@@ -339,7 +327,7 @@ CRITICAL RULES:
         contents.append(full_prompt)
         
         # Add image if provided and not in text-only mode
-        if not self.text_only_mode and (scene_image or self.current_scene_image):
+        if (scene_image or self.current_scene_image):
             image_data = scene_image or self.current_scene_image
             
             # Convert base64 to bytes for Gemini
@@ -486,61 +474,32 @@ CRITICAL RULES:
                 return trajectory, "stop"
             
             # Handle movement commands
-            if self.text_only_mode:
-                # For text-only mode, we expect single-word responses
-                if vlm_response in self.targets:
-                    target_state = self.targets[vlm_response]
-                    print(f"Moving to: {vlm_response} -> {target_state[:3]}")
+            try:
+                coords = vlm_response.split(',')
+                if len(coords) == 2:
+                    x = float(coords[0].strip())
+                    y = float(coords[1].strip())
                     
-                    # Generate trajectory
-                    trajectory = self.generate_trajectory(current_state, target_state)
-                    self.current_target = vlm_response
-                    self.current_trajectory = trajectory
-                    
-                    return trajectory, vlm_response
-                else:
-                    print(f"Unknown command: '{vlm_response}', trying to extract valid direction...")
-                    
-                    # Try to extract a valid direction from the response
-                    for direction in self.targets.keys():
-                        if direction in vlm_response.lower():
-                            print(f"Extracted direction: {direction}")
-                            target_state = self.targets[direction]
-                            trajectory = self.generate_trajectory(current_state, target_state)
-                            self.current_target = direction
-                            self.current_trajectory = trajectory
-                            return trajectory, direction
-                    
-                    print("No valid direction found, defaulting to stop")
-                    return None, None
-            else:
-                # For image mode, we expect coordinates in x,y format
-                try:
-                    coords = vlm_response.split(',')
-                    if len(coords) == 2:
-                        x = float(coords[0].strip())
-                        y = float(coords[1].strip())
+                    # Validate coordinates
+                    if self.xlim[0] <= x <= self.xlim[1] and self.ylim[0] <= y <= self.ylim[1]:
+                        target_state = np.array([x, y, -0.5, 0.0, 0.0, 0.0])  # Z and velocities are zero
+                        print(f"Moving to coordinates: ({x}, {y})")
                         
-                        # Validate coordinates
-                        if self.xlim[0] <= x <= self.xlim[1] and self.ylim[0] <= y <= self.ylim[1]:
-                            target_state = np.array([x, y, -0.5, 0.0, 0.0, 0.0])  # Z and velocities are zero
-                            print(f"Moving to coordinates: ({x}, {y})")
-                            
-                            # Generate trajectory
-                            trajectory = self.generate_trajectory(current_state, target_state)
-                            self.current_target = f"{x},{y}"
-                            self.current_trajectory = trajectory
-                            
-                            return trajectory, f"{x},{y}"
-                        else:
-                            print(f"Coordinates out of bounds: ({x}, {y}), defaulting to center")
-                            return None, None
+                        # Generate trajectory
+                        trajectory = self.generate_trajectory(current_state, target_state)
+                        self.current_target = f"{x},{y}"
+                        self.current_trajectory = trajectory
+                        
+                        return trajectory, f"{x},{y}"
                     else:
-                        print(f"Invalid coordinate format: '{vlm_response}', defaulting to center")
+                        print(f"Coordinates out of bounds: ({x}, {y}), defaulting to center")
                         return None, None
-                except ValueError:
-                    print(f"Could not parse coordinates from response: '{vlm_response}', defaulting to center")
+                else:
+                    print(f"Invalid coordinate format: '{vlm_response}', defaulting to center")
                     return None, None
+            except ValueError:
+                print(f"Could not parse coordinates from response: '{vlm_response}', defaulting to center")
+                return None, None
                 
         except Empty:
             # No new input

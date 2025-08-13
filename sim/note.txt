@@ -1,6 +1,9 @@
-remember I want to the vlm to design the cost function such that is stable, so respecting the conditions in Neural Network-Based Model Predictive Control with Input-to-State Stability.
-First for a single constant reference and then extending to a moving reference (trajectory tracking)
-
-I can probably finetune the vlm for predicting the reference trajectory and/or the cost parameters
-
-I can use the vlm to predict the next way point within the region of attraction, until it reaches the final target
+TODO:
+- set the objects directly in Sim (targets, obstacles) and extract them in VLM in ingest_info
+- draw them in RTPlotter
+- render a result of control.py with all the sim objects (robot, targets, obstacles)
+- give more emphasis to the stability, for now it's not checked after the target assignment from the vlm
+  for example I can compute the region of attraction given the current: state, ref, Q, R, LAMBDA
+  then the vlm can predict the next target inside it (ref) and the next value for the parameters (to be used to recompute the roa at the next step)
+- try using the VLM to predict a series of waypoints in place of a single target
+- use the waypoint prediction to perform more complex tasks (e.g. live obstacle avoidance)
