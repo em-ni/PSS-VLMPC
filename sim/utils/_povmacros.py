@@ -71,6 +71,55 @@ def pyelastica_rod(
     return cmd
 
 
+def pyelastica_sphere(
+    center,
+    radius,
+    color="rgb<1,0.5,0>",
+    transmit=0.0,
+    deform=None,
+    tab="    ",
+):
+    """pyelastica_sphere POVray script generator
+
+    Generates povray sphere object in string.
+    The sphere is given with center position and radius
+
+    Parameters
+    ----------
+    center : numpy array or list
+        Position vector of sphere center
+        Expected shape: [3] (x, y, z)
+    radius : float
+        Radius of the sphere
+    color : str
+        Color of the sphere (default: Orange <1,0.5,0>)
+    transmit : float
+        Transparency (0.0 to 1.0).
+    deform : str
+        Additional object deformation
+        Example: "scale<4,4,4> rotate<0,90,90> translate<2,0,4>"
+
+    Returns
+    -------
+    cmd : string
+        Povray script
+    """
+
+    lines = []
+    lines.append("sphere {")
+    lines.append(tab + f"<{center[0]},{center[1]},{center[2]}>, {radius}")
+    lines.append(tab + "texture{")
+    lines.append(tab + tab + "pigment{ color %s transmit %f }" % (color, transmit))
+    lines.append(tab + tab + "finish{ phong 1 }")
+    lines.append(tab + "}")
+    if deform is not None:
+        lines.append(tab + deform)
+    lines.append(tab + "}\n")
+
+    cmd = "\n".join(lines)
+    return cmd
+
+
 def render(
     filename, width, height, antialias="on", quality=11, display="Off", pov_thread=4
 ):

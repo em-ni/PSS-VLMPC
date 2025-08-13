@@ -23,7 +23,7 @@ from scipy import interpolate
 from tqdm import tqdm
 
 # Import your povray macros and rendering utilities
-from utils._povmacros import Stages, pyelastica_rod, render
+from utils._povmacros import Stages, pyelastica_rod, pyelastica_sphere, render
 
 # Setup (USER DEFINE)
 DATA_PATH = "results"  # Path to the simulation data folder
@@ -36,6 +36,7 @@ FPS = 20.0
 WIDTH = 1920
 HEIGHT = 1080
 DISPLAY_FRAMES = "Off"  # ['On', 'Off']
+ROTATE_VIDEO = False  # Rotate final video 180 degrees after stitching
 
 # Delete all frames in the output directory if it exists
 if os.path.exists(OUTPUT_IMAGES_DIR):
@@ -52,10 +53,11 @@ if os.path.exists(OUTPUT_IMAGES_DIR):
 # Camera/Light Configuration (USER DEFINE)
 stages = Stages()
 stages.add_camera(
-    location=[2.5, 2.5, 0.0],
-    angle=30,
-    look_at=[0.0, 0.0, 0.0],
-    name="diag"
+    location=[0.6, 1.2, 0.6],  
+    angle=0,
+    look_at=[0.0, 0.0, -0.4],  
+    name="diag",
+    sky=[0.0, 0.0, 0.1]  
 )
 stages.add_light(
     position=[1500, 2500, -1000],
@@ -83,16 +85,20 @@ if __name__ == "__main__":
     if not os.path.isdir(DATA_PATH):
         raise FileNotFoundError(f"Data folder '{DATA_PATH}' not found.")
 
-    all_data_files = glob.glob(os.path.join(DATA_PATH, "*.dat"))
-    if not all_data_files:
-        raise FileNotFoundError(f"No .dat files found in '{DATA_PATH}'")
+    all_rod_data_files = glob.glob(os.path.join(DATA_PATH, "rod*.dat"))
+    all_target_data_files = glob.glob(os.path.join(DATA_PATH, "target*.dat"))
+    
+    if not all_rod_data_files:
+        raise FileNotFoundError(f"No rod*.dat files found in '{DATA_PATH}'")
 
-    all_sim_data = []
+    all_rod_data = []
+    all_target_data = []
     max_runtime = 0.0
 
-    print(f"Found {len(all_data_files)} .dat files in '{DATA_PATH}'. Loading all...")
+    print(f"Found {len(all_rod_data_files)} rod data files and {len(all_target_data_files)} target data files in '{DATA_PATH}'. Loading all...")
 
-    for data_file_path in all_data_files:
+    # Load rod data
+    for data_file_path in all_rod_data_files:
         try:
             if SAVE_PICKLE:
                 import pickle as pk
@@ -105,7 +111,27 @@ if __name__ == "__main__":
             print(str(err))
             raise
         
-        all_sim_data.append(data)
+        all_rod_data.append(data)
+        if "time" in data and len(data["time"]) > 0:
+            max_runtime = max(max_runtime, np.array(data["time"]).max())
+        else:
+            print(f"Warning: Data file {data_file_path} has no 'time' key or empty time data.")
+    
+    # Load target data
+    for data_file_path in all_target_data_files:
+        try:
+            if SAVE_PICKLE:
+                import pickle as pk
+                with open(data_file_path, "rb") as fptr:
+                    data = pk.load(fptr)
+            else:
+                raise NotImplementedError("Only pickled data is supported")
+        except OSError as err:
+            print(f"Cannot open the datafile {data_file_path}")
+            print(str(err))
+            raise
+        
+        all_target_data.append(data)
         if "time" in data and len(data["time"]) > 0:
             max_runtime = max(max_runtime, np.array(data["time"]).max())
         else:
@@ -119,10 +145,11 @@ if __name__ == "__main__":
 
     times_true = np.linspace(0, max_runtime, total_frame)
 
+    # Interpolate rod data
     all_interpolated_xs = []
     all_base_radii_for_rods = []
 
-    for data_entry in all_sim_data:
+    for data_entry in all_rod_data:
         current_times = np.array(data_entry["time"])
         current_xs = np.array(data_entry["position"])
 
@@ -152,6 +179,43 @@ if __name__ == "__main__":
             base_radii_for_current_rod = np.ones((total_frame, n_elem_current_rod)) * 0.006
             all_base_radii_for_rods.append(base_radii_for_current_rod)
 
+    # Interpolate target data
+    all_interpolated_target_positions = []
+    target_colors = ['red', 'blue', 'orange', 'purple']
+
+    for i, data_entry in enumerate(all_target_data):
+        current_times = np.array(data_entry["time"])
+        current_positions = np.array(data_entry["position"])
+
+        if len(current_times) == 0 or current_positions.shape[0] == 0:
+            print(f"Skipping interpolation for target {i+1} with empty time or position data.")
+            # Create static target at origin if no data
+            static_position = np.zeros((total_frame, 3))
+            all_interpolated_target_positions.append(static_position)
+            continue
+
+        # Target position is usually a single point (center of sphere)
+        if current_positions.ndim == 2 and current_positions.shape[1] == 3:
+            # Position data is [time, 3] format
+            f_interp = interpolate.interp1d(current_times, current_positions, axis=0,
+                                            fill_value=(current_positions[0], current_positions[-1]),
+                                            bounds_error=False)
+            interpolated_target_position = f_interp(times_true)
+        elif current_positions.ndim == 3 and current_positions.shape[1] == 3:
+            # Position data is [time, 3, 1] format (single point)
+            positions_2d = current_positions[:, :, 0]  # Extract [time, 3]
+            f_interp = interpolate.interp1d(current_times, positions_2d, axis=0,
+                                            fill_value=(positions_2d[0], positions_2d[-1]),
+                                            bounds_error=False)
+            interpolated_target_position = f_interp(times_true)
+        else:
+            print(f"Warning: Unexpected target position data shape: {current_positions.shape}")
+            # Create static target at first position
+            first_pos = current_positions[0] if current_positions.ndim == 2 else current_positions[0, :, 0]
+            interpolated_target_position = np.tile(first_pos, (total_frame, 1))
+
+        all_interpolated_target_positions.append(interpolated_target_position)
+
     # Rendering
     batch = []
     view_name = "diag"
@@ -165,20 +229,42 @@ if __name__ == "__main__":
         script.extend([f'#include "{s}"' for s in included])
         script.append(stage_script)
 
-        # Color scheme for different rods
-        colors = ["rgb<0.8,0.2,0.2>", "rgb<0.2,0.6,0.8>", "rgb<0.2,0.8,0.2>"]
+        # Light blue color for rods
+        rod_color = "rgb<0.7,0.9,1.0>"  # Light blue
         
+        # Render rods
         for rod_idx, (interpolated_xs_for_rod, base_radius_for_rod) in enumerate(zip(all_interpolated_xs, all_base_radii_for_rods)):
             if interpolated_xs_for_rod.shape[2] == 0:
                 continue
 
-            rod_color = colors[rod_idx % len(colors)]
             rod_object = pyelastica_rod(
                 x=interpolated_xs_for_rod[frame_number],
                 r=base_radius_for_rod[frame_number],
                 color=rod_color,
             )
             script.append(rod_object)
+
+        # Render targets with their specific colors
+        pov_target_colors = {
+            'red': 'rgb<1.0,0.0,0.0>',
+            'blue': 'rgb<0.0,0.0,1.0>',
+            'orange': 'rgb<1.0,0.5,0.0>',
+            'purple': 'rgb<0.5,0.0,0.5>'
+        }
+        
+        for target_idx, target_position in enumerate(all_interpolated_target_positions):
+            if target_idx < len(target_colors):
+                color_name = target_colors[target_idx]
+                pov_color = pov_target_colors[color_name]
+            else:
+                pov_color = 'rgb<1.0,0.5,0.0>'  # Default orange
+            
+            target_object = pyelastica_sphere(
+                center=target_position[frame_number],
+                radius=0.05,  # Match the radius from Sim.py
+                color=pov_color,
+            )
+            script.append(target_object)
 
         pov_script = "\n".join(script)
 
@@ -216,4 +302,10 @@ if __name__ == "__main__":
     filename = OUTPUT_FILENAME + "_diag.mp4"
     print(f"Stitching frames into video: {filename}")
     os.system(f"ffmpeg -r {FPS} -i {imageset_path}/frame_%04d.png {filename}")
+    if ROTATE_VIDEO:
+        # Rotate final video 180 degrees after stitching
+        os.system(f"ffmpeg -i {filename} -vf 'rotate=180*PI/180' {filename}_rotated.mp4")
+        # delete the original video file
+        os.remove(filename)
+        os.rename(f"{filename}_rotated.mp4", filename)
     print("Video generation complete.")
