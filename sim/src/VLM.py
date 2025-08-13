@@ -14,6 +14,7 @@ import os
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from .VLMWebUI import VLMWebUI
 
 """
 For Llama.cpp:
@@ -26,7 +27,7 @@ Add G_API_KEY=your-api-key to .env file
 """
 
 class VLM:
-    def __init__(self, server_url="http://localhost:8080", vlm_dt=1.0, mpc_dt=0.02, backend="llama", model_name="gemini-2.5-pro"):
+    def __init__(self, server_url="http://localhost:8080", vlm_dt=1.0, mpc_dt=0.02, backend="llama", model_name="gemini-2.5-pro", web_ui=True):
         """
         Vision Language Model interface for dynamic target assignment.
         
@@ -42,6 +43,7 @@ class VLM:
         self.mpc_dt = mpc_dt
         self.backend = backend.lower()
         self.model_name = model_name
+        self.web_ui = web_ui
         
         # Initialize default attributes first (before any potential exceptions)
         self.session = None
@@ -49,6 +51,10 @@ class VLM:
         self.user_input_queue = Queue()
         self.input_thread = None
         self.running = False
+
+        if self.web_ui:
+            # Initialize UI
+            self.ui = VLMWebUI(self.user_input_queue)
         
         # Initialize backend-specific clients
         if self.backend == "llama":
@@ -414,11 +420,15 @@ CRITICAL RULES:
         return trajectory
 
     def start_input_thread(self):
-        """Start the input monitoring thread."""
         self.running = True
-        self.input_thread = threading.Thread(target=self._input_worker, daemon=True)
-        self.input_thread.start()
-        print("VLM input thread started. Type commands during simulation!")
+        if self.web_ui:
+            print("Starting VLM UI...")
+            self.ui.start_ui()
+            print("VLM UI started! Use the GUI window to send commands.")
+        else:
+            self.input_thread = threading.Thread(target=self._input_worker, daemon=True)
+            self.input_thread.start()
+            print("VLM input thread started. Type commands during simulation!")
 
     def _input_worker(self):
         """Worker thread to handle user input."""
@@ -449,7 +459,9 @@ CRITICAL RULES:
             # Check for new user input
             user_input = self.user_input_queue.get_nowait()
             print(f"Processing command: '{user_input}'")
-            
+
+            if self.web_ui: self.ui.add_status_update(f"Processing: {user_input}")
+
             # First try with scene image if available
             vlm_response = None
             if scene_image:
@@ -462,11 +474,16 @@ CRITICAL RULES:
             
             if vlm_response is None:
                 print("VLM query failed completely")
+                if self.web_ui: self.ui.add_response("❌ VLM query failed")
                 return None, None
                 
+            # Add VLM response to UI
+            if self.web_ui: self.ui.add_response(f"Target: {vlm_response}")
+            print(f"VLM response: '{vlm_response}'")
             # Handle stop command
             if vlm_response == "stop":
                 print("Stop command received")
+                if self.web_ui: self.ui.add_status_update("Robot stopped")
                 # Create a trajectory that stays at current position
                 stop_target = current_state.copy()
                 stop_target[3:] = 0.0  # Zero velocities
@@ -484,6 +501,7 @@ CRITICAL RULES:
                     if self.xlim[0] <= x <= self.xlim[1] and self.ylim[0] <= y <= self.ylim[1]:
                         target_state = np.array([x, y, -0.5, 0.0, 0.0, 0.0])  # Z and velocities are zero
                         print(f"Moving to coordinates: ({x}, {y})")
+                        if self.web_ui: self.ui.add_status_update(f"Moving to ({x:.2f}, {y:.2f})")
                         
                         # Generate trajectory
                         trajectory = self.generate_trajectory(current_state, target_state)
@@ -493,12 +511,15 @@ CRITICAL RULES:
                         return trajectory, f"{x},{y}"
                     else:
                         print(f"Coordinates out of bounds: ({x}, {y}), defaulting to center")
+                        if self.web_ui: self.ui.add_response("❌ Coordinates out of bounds")
                         return None, None
                 else:
                     print(f"Invalid coordinate format: '{vlm_response}', defaulting to center")
+                    if self.web_ui: self.ui.add_response("❌ Invalid coordinate format")
                     return None, None
             except ValueError:
                 print(f"Could not parse coordinates from response: '{vlm_response}', defaulting to center")
+                if self.web_ui: self.ui.add_response("❌ Could not parse coordinates")
                 return None, None
                 
         except Empty:
@@ -550,8 +571,16 @@ CRITICAL RULES:
     def stop(self):
         """Stop the VLM and cleanup."""
         self.running = False
+        
+        if self.web_ui:
+            # Stop UI
+            if hasattr(self, 'ui') and self.ui:
+                self.ui.stop()
+            
+        # Stop input thread (legacy)
         if hasattr(self, 'input_thread') and self.input_thread and self.input_thread.is_alive():
             self.input_thread.join(timeout=1.0)
+            
         print("VLM stopped")
 
     def __del__(self):

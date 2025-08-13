@@ -153,7 +153,7 @@ def main():
     if CONTROL_MODE == "vlm":
         # Initialize VLM for user input
         print("\nInitializing VLM...")
-        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], backend="gemini", model_name="gemini-2.5-pro")
+        vlm = VLM(vlm_dt=vlm_dt, mpc_dt=simulation_params['mpc_dt'], backend="gemini", model_name="gemini-2.5-pro", web_ui=True)
 
         # Check if VLM server is running
         if not vlm.check_server():
@@ -222,7 +222,6 @@ def main():
     step_skip_vlm = int(vlm_dt / simulation_params['dt'])
     current_time = 0.0
     i = 0
-    print("Type command here to move the robot\n")
     try:
         # main loop
         # for i in tqdm(range(total_steps)):        

@@ -60,7 +60,7 @@ stages.add_camera(
     sky=[0.0, 0.0, 0.1]  
 )
 stages.add_light(
-    position=[1500, 2500, -1000],
+    position=[1500, 2500, 1000],
     color="White",
     camera_id=-1
 )
