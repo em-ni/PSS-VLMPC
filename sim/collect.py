@@ -40,7 +40,7 @@ current_backend = set_matplotlib_backend()
 # Simulation settings
 SAVE_RESULTS = True
 SAVE_VIDEO = False
-REAL_TIME_PLOT = False
+REAL_TIME_PLOT = True
 N_TRAJECTORIES = 5000  # 1000 trajectories ~ 500k rows
 TRAJECTORY_TIME = 10    # Total time for each trajectory
 HOLD_TIME = 2           # Time to hold the last torque before pausing
@@ -59,7 +59,8 @@ simulation_params = {
     'dt': 1e-4,
     'double_rod': True,
     'max_torque': 9e-2,
-    'mpc_dt': 0.02
+    'mpc_dt': 0.02,
+    'with_targets': True  # Enable targets
 }
 step_skip = simulation_params['mpc_dt'] / simulation_params['dt']
 
@@ -151,8 +152,10 @@ def main():
     
     # Get simulation components
     rods_list = cc_sim.get_rods()
+    targets_list = cc_sim.get_targets()
     torque_objects = cc_sim.get_torque_objects()
     callback_params = cc_sim.get_callback_params()
+    target_callback_params = cc_sim.get_target_callback_params()
     
     # Build trajectories
     trajectories = []
@@ -197,7 +200,7 @@ def main():
     plotter = None
     if REAL_TIME_PLOT:
         print("Setting up real-time plotter...")
-        plotter = RTPlotter(rods_list)
+        plotter = RTPlotter(rods_list, targets_list)
     
     # Run simulation
     total_steps = int(final_time / simulation_params['dt'])
@@ -342,6 +345,13 @@ def main():
             with open(filename, "wb") as file:
                 pickle.dump(params, file)
             print(f"Saved rod {i+1} data to {filename}")
+            
+        # Save data for each target
+        for i, params in enumerate(target_callback_params):
+            filename = f"results/target{i+1}.dat"
+            with open(filename, "wb") as file:
+                pickle.dump(params, file)
+            print(f"Saved target {i+1} data to {filename}")
             
         # Build the csv dataset
         print("Building dataset from simulation data...")

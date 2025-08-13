@@ -5,9 +5,10 @@ import numpy as np
 from collections import deque
 
 class RTPlotter:
-    def __init__(self, rods, xlim=(-1.5, 1.5), ylim=(-1.5, 1.5), zlim=(-1.5, 1.5), 
+    def __init__(self, rods, targets=None, xlim=(-1.5, 1.5), ylim=(-1.5, 1.5), zlim=(-1.5, 1.5), 
                  show_reference=True, trajectory_history_length=50):
         self.rods = rods
+        self.targets = targets if targets is not None else []
         self.xlim = xlim
         self.ylim = ylim
         self.zlim = zlim
@@ -63,25 +64,66 @@ class RTPlotter:
         self.lines_xz = []
         self.lines_3d = []
         
-        colors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan', 'magenta']
+        # Initialize sphere objects for targets
+        self.spheres_xy = []
+        self.spheres_xz = []
+        self.spheres_3d = []
+        
+        # Use light blue for all rods
+        rod_color = 'lightblue'
         
         for i, rod in enumerate(self.rods):
-            color = colors[i % len(colors)]
-            
             # XY view lines
-            line_xy, = self.ax_xy.plot([], [], color=color, linewidth=3, 
+            line_xy, = self.ax_xy.plot([], [], color=rod_color, linewidth=3, 
                                      marker='o', markersize=3, label=f'Rod {i+1}')
             self.lines_xy.append(line_xy)
             
             # XZ view lines
-            line_xz, = self.ax_xz.plot([], [], color=color, linewidth=3, 
+            line_xz, = self.ax_xz.plot([], [], color=rod_color, linewidth=3, 
                                      marker='o', markersize=3, label=f'Rod {i+1}')
             self.lines_xz.append(line_xz)
             
             # 3D view lines
-            line_3d, = self.ax_3d.plot([], [], [], color=color, linewidth=3, 
+            line_3d, = self.ax_3d.plot([], [], [], color=rod_color, linewidth=3, 
                                      marker='o', markersize=4, label=f'Rod {i+1}')
             self.lines_3d.append(line_3d)
+            
+        # Initialize target sphere visualizations
+        for i, target in enumerate(self.targets):
+            # Get target color if available, otherwise use default
+            if hasattr(target, 'target_color'):
+                sphere_color = target.target_color
+                # Create edge color (darker version)
+                edge_color_map = {
+                    'red': 'darkred',
+                    'blue': 'darkblue', 
+                    'orange': 'darkorange',
+                    'purple': 'indigo'
+                }
+                edge_color = edge_color_map.get(sphere_color, 'black')
+            else:
+                sphere_color = 'orange'
+                edge_color = 'darkorange'
+                
+            markersize = 50  # Large marker to represent sphere
+            
+            # XY view sphere
+            sphere_xy, = self.ax_xy.plot([], [], 'o', color=sphere_color, markersize=markersize/10, 
+                                        markeredgecolor=edge_color, markeredgewidth=2,
+                                        label=f'Target {i+1}', zorder=5, alpha=0.8)
+            self.spheres_xy.append(sphere_xy)
+            
+            # XZ view sphere
+            sphere_xz, = self.ax_xz.plot([], [], 'o', color=sphere_color, markersize=markersize/10, 
+                                        markeredgecolor=edge_color, markeredgewidth=2,
+                                        label=f'Target {i+1}', zorder=5, alpha=0.8)
+            self.spheres_xz.append(sphere_xz)
+            
+            # 3D view sphere
+            sphere_3d, = self.ax_3d.plot([], [], [], 'o', color=sphere_color, markersize=markersize/7, 
+                                        markeredgecolor=edge_color, markeredgewidth=2,
+                                        label=f'Target {i+1}', zorder=5, alpha=0.8)
+            self.spheres_3d.append(sphere_3d)
         
         # Initialize reference trajectory visualization elements
         if self.show_reference:
@@ -187,6 +229,22 @@ class RTPlotter:
             
             # Update 3D view
             self.lines_3d[i].set_data_3d(pos[0, :], pos[1, :], pos[2, :])
+        
+        # Update target sphere visualizations
+        for i, target in enumerate(self.targets):
+            # Get target position (for spheres, position_collection is the center)
+            if hasattr(target, 'position_collection') and target.position_collection.size > 0:
+                if target.position_collection.ndim == 1:
+                    # Single position vector
+                    target_pos = target.position_collection
+                else:
+                    # Multiple positions, take the center
+                    target_pos = target.position_collection[:, 0] if target.position_collection.shape[1] > 0 else target.position_collection
+                
+                # Update sphere positions
+                self.spheres_xy[i].set_data([target_pos[0]], [target_pos[1]])
+                self.spheres_xz[i].set_data([target_pos[0]], [target_pos[2]])
+                self.spheres_3d[i].set_data_3d([target_pos[0]], [target_pos[1]], [target_pos[2]])
         
         # Update reference trajectory visualization
         if self.show_reference and self.reference_position is not None:

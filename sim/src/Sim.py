@@ -3,6 +3,7 @@ import elastica as ea
 from elastica.boundary_conditions import FixedConstraint
 from elastica.joint import get_relative_rotation_two_systems
 from elastica.timestepper import extend_stepper_interface
+from elastica.rigidbody import Sphere
 
 
 class ConstantCurvatureBase(
@@ -15,6 +16,7 @@ class ConstantCurvatureBase(
 ):
     pass
 
+from src.DataCallback import DataCallback, RigidSphereCallBack
 
 class Sim:
     """
@@ -32,7 +34,9 @@ class Sim:
                  dt=1e-4,
                  double_rod=True,
                  max_torque=5e-2,
-                 mpc_dt=0.02):
+                 mpc_dt=0.02,
+                 with_targets=False
+                 ):
         """
         Initialize the constant curvature simulation.
         
@@ -87,8 +91,11 @@ class Sim:
         # Initialize simulation components
         self.cc_sim = None
         self.rods = []
+        self.targets = []
+        self.with_targets = with_targets
         self.torque_objects = []
         self.callback_params = []
+        self.target_callback_params = []
         self.timestepper = None
         self.do_step = None
         self.stages_and_updates = None
@@ -96,6 +103,32 @@ class Sim:
         # Setup the simulation
         self._setup_simulation()
     
+    def add_targets(self):
+        """Add target spheres to the simulation."""
+        # Define target positions and colors
+        target_positions = [
+            np.array([0.5, 0.0, -0.5]),  # right on the XY plane
+            np.array([-0.5, 0.0, -0.5]), # lfet
+            np.array([0.0, 0.5, -0.5]),  # up
+            np.array([0.0, -0.5, -0.5]), # down
+        ]
+        
+        target_colors = ['red', 'blue', 'orange', 'purple']
+        
+        # Create targets
+        for i, (position, color) in enumerate(zip(target_positions, target_colors)):
+            target = Sphere(
+                center=position,
+                base_radius=0.05,
+                density=1000,
+            )
+            # Store color as an attribute for visualization
+            target.target_color = color
+            target.target_id = i
+            
+            self.cc_sim.append(target)
+            self.targets.append(target)
+
     def _setup_simulation(self):
         """Setup the complete simulation including rods, constraints, and forces."""
         
@@ -104,6 +137,10 @@ class Sim:
         
         # Create rods
         self._create_rods()
+        
+        # Add targets if requested
+        if self.with_targets:
+            self.add_targets()
         
         # Apply constraints, forces, and damping
         self._apply_constraints_and_forces()
@@ -219,13 +256,6 @@ class Sim:
     def _setup_callbacks(self):
         """Setup data collection callbacks for each rod."""
         
-        # Import callback class (assuming it exists in your src folder)
-        try:
-            from src.DataCallback import DataCallback
-        except ImportError:
-            # Fallback to a simple callback if DataCallback is not available
-            DataCallback = ea.CallBackBaseClass
-        
         for i, rod in enumerate(self.rods):
             callback_params = ea.defaultdict(list)
             self.cc_sim.collect_diagnostics(rod).using(
@@ -234,7 +264,18 @@ class Sim:
                 callback_params=callback_params
             )
             self.callback_params.append(callback_params)
-    
+            
+        # If targets are defined, setup their callbacks
+        if hasattr(self, 'targets') and len(self.targets) > 0:
+            for target in self.targets:
+                target_callback_params = ea.defaultdict(list)
+                self.cc_sim.collect_diagnostics(target).using(
+                    RigidSphereCallBack,
+                    step_skip=self.step_skip,
+                    callback_params=target_callback_params
+                )
+                self.target_callback_params.append(target_callback_params)
+
     def _extract_torque_objects(self):
         """Extract torque objects for dynamic control during simulation."""
         
@@ -256,6 +297,14 @@ class Sim:
     def get_rods(self):
         """Return the list of rods in the simulation."""
         return self.rods
+    
+    def get_targets(self):
+        """Return the list of target spheres in the simulation."""
+        return self.targets
+    
+    def get_target_callback_params(self):
+        """Return the callback parameters for target data collection."""
+        return self.target_callback_params
     
     def get_torque_objects(self):
         """Return the list of torque objects for dynamic control."""
@@ -279,7 +328,55 @@ class Sim:
             return np.concatenate((rod.position_collection[-1], rod.director_collection[-1]))
         else:
             raise ValueError("No rods available in the simulation.")
-
+    
+    def get_target_position(self, target_idx=0):
+        """
+        Get the position of a target sphere.
+        
+        Parameters:
+        -----------
+        target_idx : int
+            Index of the target (default: 0 for first target)
+            
+        Returns:
+        --------
+        np.ndarray
+            3D position of the target center
+        """
+        if target_idx < len(self.targets):
+            target = self.targets[target_idx]
+            if hasattr(target, 'position_collection'):
+                if target.position_collection.ndim == 1:
+                    return target.position_collection.copy()
+                else:
+                    return target.position_collection[:, 0].copy()
+            else:
+                raise ValueError(f"Target {target_idx} does not have position information.")
+        else:
+            raise ValueError(f"Target index {target_idx} out of range. Available targets: {len(self.targets)}")
+    
+    def set_target_position(self, target_idx, new_position):
+        """
+        Set the position of a target sphere (for dynamic targets).
+        
+        Parameters:
+        -----------
+        target_idx : int
+            Index of the target
+        new_position : np.ndarray
+            New 3D position for the target center
+        """
+        if target_idx < len(self.targets):
+            target = self.targets[target_idx]
+            if hasattr(target, 'position_collection'):
+                if target.position_collection.ndim == 1:
+                    target.position_collection[:] = new_position
+                else:
+                    target.position_collection[:, 0] = new_position
+            else:
+                raise ValueError(f"Target {target_idx} does not have position information.")
+        else:
+            raise ValueError(f"Target index {target_idx} out of range. Available targets: {len(self.targets)}")
 
     def step(self, time):
         """
