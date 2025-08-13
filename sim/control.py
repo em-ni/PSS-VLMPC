@@ -58,6 +58,7 @@ signal.signal(signal.SIGTERM, lambda sig, frame: (cleanup(), sys.exit(0)))
 # Simulation settings
 REAL_TIME_PLOT = True
 DEBUG_STATE_PREDICTION = False  # Enable to plot state prediction error
+SAVE_RESULTS = True 
 PLOT_EVERY_N_STEPS = 500
 FINAL_TIME = 10
 # CONTROL_MODE = "spr" # set point regulation
@@ -131,6 +132,7 @@ def main():
     rods_list = cc_sim.get_rods()
     targets_list = cc_sim.get_targets()
     callback_params = cc_sim.get_callback_params()
+    target_callback_params = cc_sim.get_target_callback_params()
     
     # Print simulation info
     sim_info = cc_sim.get_simulation_info()
@@ -250,10 +252,10 @@ def main():
                     target_history=history_target_position[-50:] if history_target_position else None
                 )
                     
-                # Save first scene image for debugging
-                if i == 0 and scene_image is not None:
-                    vlm.save_scene_image(filename='initial_vlm_view.png')
-                    print("Initial scene image saved as 'initial_vlm_view.png'")
+                # # Save first scene image for debugging
+                # if i == 0 and scene_image is not None:
+                #     vlm.save_scene_image(filename='initial_vlm_view.png')
+                #     print("Initial scene image saved as 'initial_vlm_view.png'")
 
                 # Process VLM input with visual context
                 new_trajectory, target_name = vlm.process_user_input(x_current_vlm, scene_image)
@@ -396,7 +398,44 @@ def main():
             history_x_current_test = np.array(history_x_current_test)
             history_x_current_pred = np.array(history_x_current_pred)        
             plot_predictions(history_x_current_test, history_x_current_pred, 'results/predictions_plot.png')
+
+    if SAVE_RESULTS:
+        print("\nSaving simulation results...")
         
+        # Define the target directory
+        results_dir = "results"
+
+        # Ensure the results directory exists
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir)
+        else:
+            # Iterate over all the items in the directory
+            for filename in os.listdir(results_dir):
+                # Check if the item's name ends with .dat
+                if filename.endswith(".dat"):
+                    file_path = os.path.join(results_dir, filename)
+                    try:
+                        # Extra check to ensure it's a file before trying to delete
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                            print(f"Deleted data file: {file_path}")
+                    except Exception as e:
+                        print(f"Failed to delete {file_path}. Reason: {e}")
+            
+        # Save data for each rod
+        for i, params in enumerate(callback_params):
+            filename = f"results/rod{i+1}.dat"
+            with open(filename, "wb") as file:
+                pickle.dump(params, file)
+            print(f"Saved rod {i+1} data to {filename}")
+            
+        # Save data for each target
+        for i, params in enumerate(target_callback_params):
+            filename = f"results/target{i+1}.dat"
+            with open(filename, "wb") as file:
+                pickle.dump(params, file)
+            print(f"Saved target {i+1} data to {filename}")
+
     print("\nAll done!")
 
 

@@ -32,7 +32,7 @@ SAVE_PICKLE = True
 # Rendering Configuration (USER DEFINE)
 OUTPUT_FILENAME = "render"
 OUTPUT_IMAGES_DIR = "frames"
-FPS = 20.0
+FPS = 30.0
 WIDTH = 1920
 HEIGHT = 1080
 DISPLAY_FRAMES = "Off"  # ['On', 'Off']
@@ -259,8 +259,12 @@ if __name__ == "__main__":
             else:
                 pov_color = 'rgb<1.0,0.5,0.0>'  # Default orange
             
+            # Convert coordinates from (x,y,z) to (-y,x,z)
+            original_position = target_position[frame_number]
+            converted_position = np.array([original_position[1], -original_position[0], original_position[2]])
+            
             target_object = pyelastica_sphere(
-                center=target_position[frame_number],
+                center=converted_position,
                 radius=0.05,  # Match the radius from Sim.py
                 color=pov_color,
             )

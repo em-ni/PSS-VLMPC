@@ -101,7 +101,7 @@ class VLMWebHandler(BaseHTTPRequestHandler):
             padding: 10px;
             margin-bottom: 20px;
             font-family: 'Courier New', monospace;
-            font-size: 12px;
+            font-size: 20px;
         }
         .input-container {
             display: flex;
@@ -115,7 +115,7 @@ class VLMWebHandler(BaseHTTPRequestHandler):
             border: 1px solid #555;
             border-radius: 3px;
             color: white;
-            font-size: 14px;
+            font-size: 20px;
         }
         #sendButton {
             padding: 10px 20px;
@@ -124,13 +124,13 @@ class VLMWebHandler(BaseHTTPRequestHandler):
             border-radius: 3px;
             color: white;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 20px;
         }
         #sendButton:hover {
             background-color: #45a049;
         }
         .command {
-            color: #4CAF50;
+            color: #4CAF50; 
         }
         .response {
             color: #FFA500;
@@ -158,7 +158,7 @@ class VLMWebHandler(BaseHTTPRequestHandler):
             <button id="sendButton">Send</button>
         </div>
         
-        <div style="text-align: center; color: #888; font-size: 12px;">
+        <div style="text-align: center; color: #888; font-size: 18px;">
             Press Enter to send command | Commands are processed in real-time
         </div>
     </div>
@@ -307,7 +307,7 @@ class VLMWebUI:
         if self.server and hasattr(self.server, 'history'):
             self.server.history.append({
                 'type': 'response',
-                'text': f"🤖 {response}",
+                'text': f"{response}",
                 'timestamp': time.strftime('%H:%M:%S')
             })
             
@@ -316,7 +316,7 @@ class VLMWebUI:
         if self.server and hasattr(self.server, 'history'):
             self.server.history.append({
                 'type': 'status',
-                'text': f"ℹ️ {status}",
+                'text': f"{status}",
                 'timestamp': time.strftime('%H:%M:%S')
             })
             
