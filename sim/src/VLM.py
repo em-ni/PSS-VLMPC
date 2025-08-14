@@ -216,6 +216,32 @@ class VLM:
                            markersize=8, markeredgecolor='black', markeredgewidth=1,
                            label=f'Target {target_id}: {target_color.upper()}', zorder=4)
 
+            # Extract and plot obstacles directly from simulation
+            if hasattr(sim_data, 'get_obstacles'):
+                sim_obstacles = sim_data.get_obstacles()
+                for obstacle in sim_obstacles:
+                    # Get obstacle position
+                    if hasattr(obstacle, 'position_collection'):
+                        if obstacle.position_collection.ndim == 1:
+                            obstacle_pos = obstacle.position_collection
+                        else:
+                            obstacle_pos = obstacle.position_collection[:, 0]
+                    else:
+                        continue  # Skip if no position data
+                    
+                    # Get obstacle properties
+                    obstacle_color = getattr(obstacle, 'obstacle_color', 'gray')
+                    obstacle_id = getattr(obstacle, 'obstacle_id', 'unknown')
+                    obstacle_radius = getattr(obstacle, 'base_radius', 0.05)
+                    
+                    # Plot the obstacle as a circle (cross-section of cylinder)
+                    circle = patches.Circle((obstacle_pos[0], obstacle_pos[1]), obstacle_radius,
+                                          color=obstacle_color, alpha=0.7, zorder=3,
+                                          edgecolor='black', linewidth=1)
+                    ax.add_patch(circle)
+                    # ax.text(obstacle_pos[0], obstacle_pos[1] + obstacle_radius + 0.05, 
+                    #        f'Obstacle {obstacle_id}', ha='center', va='bottom', fontsize=8)
+
             plt.tight_layout()
             
             # Convert to base64 encoded image

@@ -242,11 +242,32 @@ class VLMWebUI:
             
         self.running = True
         
+        # Try multiple ports if the default is in use
+        ports_to_try = [self.port, self.port + 1, self.port + 2, self.port + 3, self.port + 4]
+        server_started = False
+        
+        for port in ports_to_try:
+            try:
+                # Create HTTP server
+                self.server = HTTPServer(('localhost', port), VLMWebHandler)
+                self.server.command_queue = self.command_queue
+                self.server.history = []
+                self.port = port  # Update to the actual port used
+                server_started = True
+                break
+            except OSError as e:
+                if e.errno == 98:  # Address already in use
+                    print(f"Port {port} is in use, trying next port...")
+                    continue
+                else:
+                    raise e
+        
+        if not server_started:
+            print(f"Failed to start web UI: No available ports in range {ports_to_try[0]}-{ports_to_try[-1]}")
+            self.running = False
+            return
+        
         try:
-            # Create HTTP server
-            self.server = HTTPServer(('localhost', self.port), VLMWebHandler)
-            self.server.command_queue = self.command_queue
-            self.server.history = []
             
             # Start server in separate thread
             self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -256,47 +277,47 @@ class VLMWebUI:
             url = f"http://localhost:{self.port}"
             print(f"VLM Web UI started at: {url}")
             
-            # Try multiple methods to open browser
-            browser_opened = False
+            # # Try multiple methods to open browser
+            # browser_opened = False
             
-            # Method 1: Try webbrowser module
-            try:
-                webbrowser.open(url)
-                browser_opened = True
-                print("Browser opened automatically")
-            except Exception as e:
-                print(f"webbrowser.open failed: {e}")
+            # # Method 1: Try webbrowser module
+            # try:
+            #     webbrowser.open(url)
+            #     browser_opened = True
+            #     print("Browser opened automatically")
+            # except Exception as e:
+            #     print(f"webbrowser.open failed: {e}")
             
-            # Method 2: Try system commands if webbrowser failed
-            if not browser_opened:
-                import subprocess
-                try:
-                    # Try different commands based on the system
-                    commands = [
-                        ['xdg-open', url],  # Linux
-                        ['open', url],      # macOS
-                        ['start', url],     # Windows
-                        ['firefox', url],   # Firefox directly
-                        ['google-chrome', url],  # Chrome directly
-                        ['chromium-browser', url],  # Chromium
-                    ]
+            # # Method 2: Try system commands if webbrowser failed
+            # if not browser_opened:
+            #     import subprocess
+            #     try:
+            #         # Try different commands based on the system
+            #         commands = [
+            #             ['xdg-open', url],  # Linux
+            #             ['open', url],      # macOS
+            #             ['start', url],     # Windows
+            #             ['firefox', url],   # Firefox directly
+            #             ['google-chrome', url],  # Chrome directly
+            #             ['chromium-browser', url],  # Chromium
+            #         ]
                     
-                    for cmd in commands:
-                        try:
-                            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            browser_opened = True
-                            print(f"Browser opened using: {cmd[0]}")
-                            break
-                        except (subprocess.CalledProcessError, FileNotFoundError):
-                            continue
+            #         for cmd in commands:
+            #             try:
+            #                 subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            #                 browser_opened = True
+            #                 print(f"Browser opened using: {cmd[0]}")
+            #                 break
+            #             except (subprocess.CalledProcessError, FileNotFoundError):
+            #                 continue
                             
-                except Exception as e:
-                    print(f"System command browser opening failed: {e}")
+            #     except Exception as e:
+            #         print(f"System command browser opening failed: {e}")
             
             # If all methods failed, provide manual instructions
-            if not browser_opened:
-                print(f"Please manually open your web browser and navigate to:")
-                print(f"    {url}")
+            # if not browser_opened:
+            #     print(f"Please manually open your web browser and navigate to:")
+            #     print(f"    {url}")
                 
         except Exception as e:
             print(f"Failed to start web UI: {e}")

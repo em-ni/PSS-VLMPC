@@ -3,7 +3,7 @@ import elastica as ea
 from elastica.boundary_conditions import FixedConstraint
 from elastica.joint import get_relative_rotation_two_systems
 from elastica.timestepper import extend_stepper_interface
-from elastica.rigidbody import Sphere
+from elastica.rigidbody import Sphere, Cylinder
 
 
 class ConstantCurvatureBase(
@@ -16,7 +16,7 @@ class ConstantCurvatureBase(
 ):
     pass
 
-from src.DataCallback import DataCallback, RigidSphereCallBack
+from src.DataCallback import DataCallback, RigidSphereCallBack, RigidCylinderCallBack
 
 class Sim:
     """
@@ -35,8 +35,8 @@ class Sim:
                  double_rod=True,
                  max_torque=5e-2,
                  mpc_dt=0.02,
-                 with_targets=False
-                 ):
+                 with_targets=False,
+                 with_obstacles=False):
         """
         Initialize the constant curvature simulation.
         
@@ -92,10 +92,13 @@ class Sim:
         self.cc_sim = None
         self.rods = []
         self.targets = []
+        self.obstacles = []
         self.with_targets = with_targets
+        self.with_obstacles = with_obstacles
         self.torque_objects = []
         self.callback_params = []
         self.target_callback_params = []
+        self.obstacles_callback_params = []
         self.timestepper = None
         self.do_step = None
         self.stages_and_updates = None
@@ -128,6 +131,37 @@ class Sim:
             
             self.cc_sim.append(target)
             self.targets.append(target)
+            
+    def add_obstacles(self):
+        """Add rigid cylinder obstacles to the simulation."""
+        # Define obstacle positions and dimensions
+        obstacle_color = 'gray'
+        obstacle_radius = 0.05
+        obstacle_length = 0.4
+        obstacle_positions = [
+            np.array([0.20, 0.20, -1.0]),
+            np.array([0.20, -0.20, -1.0]),
+            np.array([-0.20, 0.20, -1.0]),
+            np.array([-0.20, -0.20, -1.0]),
+        ]
+        
+        for i in range(len(obstacle_positions)):
+
+            # Create a cylinder obstacle
+            obstacle = Cylinder(
+                start=obstacle_positions[i],
+                direction=np.array([0.0, 0.0, 1.0]),
+                normal=np.array([0.0, 1.0, 0.0]),
+                base_length=obstacle_length,
+                base_radius=obstacle_radius,
+                density=1000,
+            )
+            # Store color as an attribute for visualization
+            obstacle.obstacle_color = obstacle_color
+            obstacle.obstacle_id = i
+            
+            self.cc_sim.append(obstacle)
+            self.obstacles.append(obstacle)
 
     def _setup_simulation(self):
         """Setup the complete simulation including rods, constraints, and forces."""
@@ -141,6 +175,10 @@ class Sim:
         # Add targets if requested
         if self.with_targets:
             self.add_targets()
+            
+        # Add obstacles if requested
+        if self.with_obstacles:
+            self.add_obstacles()
         
         # Apply constraints, forces, and damping
         self._apply_constraints_and_forces()
@@ -275,6 +313,17 @@ class Sim:
                     callback_params=target_callback_params
                 )
                 self.target_callback_params.append(target_callback_params)
+                
+        # If obstacles are defined, setup their callbacks
+        if hasattr(self, 'obstacles') and len(self.obstacles) > 0:
+            for obstacle in self.obstacles:
+                obstacle_callback_params = ea.defaultdict(list)
+                self.cc_sim.collect_diagnostics(obstacle).using(
+                    RigidCylinderCallBack,
+                    step_skip=self.step_skip,
+                    callback_params=obstacle_callback_params
+                )
+                self.obstacles_callback_params.append(obstacle_callback_params)
 
     def _extract_torque_objects(self):
         """Extract torque objects for dynamic control during simulation."""
@@ -298,6 +347,14 @@ class Sim:
         """Return the list of rods in the simulation."""
         return self.rods
     
+    def get_obstacles(self):
+        """Return the list of obstacles in the simulation."""
+        return self.obstacles
+
+    def get_obstacle_callback_params(self):
+        """Return the callback parameters for obstacle data collection."""
+        return self.obstacles_callback_params
+
     def get_targets(self):
         """Return the list of target spheres in the simulation."""
         return self.targets
@@ -354,6 +411,32 @@ class Sim:
                 raise ValueError(f"Target {target_idx} does not have position information.")
         else:
             raise ValueError(f"Target index {target_idx} out of range. Available targets: {len(self.targets)}")
+        
+    def get_obstacle_positions(self, obstacle_idx=0):
+        """
+        Get the position of a rigid cylinder obstacle.
+        
+        Parameters:
+        -----------
+        obstacle_idx : int
+            Index of the obstacle (default: 0 for first obstacle)
+            
+        Returns:
+        --------
+        np.ndarray
+            3D position of the obstacle center
+        """
+        if obstacle_idx < len(self.obstacles):
+            obstacle = self.obstacles[obstacle_idx]
+            if hasattr(obstacle, 'position_collection'):
+                if obstacle.position_collection.ndim == 1:
+                    return obstacle.position_collection.copy()
+                else:
+                    return obstacle.position_collection[:, 0].copy()
+            else:
+                raise ValueError(f"Obstacle {obstacle_idx} does not have position information.")
+        else:
+            raise ValueError(f"Obstacle index {obstacle_idx} out of range. Available obstacles: {len(self.obstacles)}")
     
     def set_target_position(self, target_idx, new_position):
         """
@@ -377,6 +460,29 @@ class Sim:
                 raise ValueError(f"Target {target_idx} does not have position information.")
         else:
             raise ValueError(f"Target index {target_idx} out of range. Available targets: {len(self.targets)}")
+        
+    def set_obstacle_position(self, obstacle_idx, new_position):
+        """
+        Set the position of a rigid cylinder obstacle (for dynamic obstacles).
+        
+        Parameters:
+        -----------
+        obstacle_idx : int
+            Index of the obstacle
+        new_position : np.ndarray
+            New 3D position for the obstacle center
+        """
+        if obstacle_idx < len(self.obstacles):
+            obstacle = self.obstacles[obstacle_idx]
+            if hasattr(obstacle, 'position_collection'):
+                if obstacle.position_collection.ndim == 1:
+                    obstacle.position_collection[:] = new_position
+                else:
+                    obstacle.position_collection[:, 0] = new_position
+            else:
+                raise ValueError(f"Obstacle {obstacle_idx} does not have position information.")
+        else:
+            raise ValueError(f"Obstacle index {obstacle_idx} out of range. Available obstacles: {len(self.obstacles)}")
 
     def step(self, time):
         """

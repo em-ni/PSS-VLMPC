@@ -1,14 +1,16 @@
 import time
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
+import matplotlib.patches
 import numpy as np
 from collections import deque
 
 class RTPlotter:
-    def __init__(self, rods, targets=None, xlim=(-1.5, 1.5), ylim=(-1.5, 1.5), zlim=(-1.5, 1.5), 
+    def __init__(self, rods, targets=None, obstacles=None, xlim=(-1.5, 1.5), ylim=(-1.5, 1.5), zlim=(-1.5, 1.5), 
                  show_reference=True, trajectory_history_length=50):
         self.rods = rods
         self.targets = targets if targets is not None else []
+        self.obstacles = obstacles if obstacles is not None else []
         self.xlim = xlim
         self.ylim = ylim
         self.zlim = zlim
@@ -69,6 +71,11 @@ class RTPlotter:
         self.spheres_xz = []
         self.spheres_3d = []
         
+        # Initialize cylinder objects for obstacles
+        self.cylinders_xy = []
+        self.cylinders_xz = []
+        self.cylinders_3d = []
+        
         # Use light blue for all rods
         rod_color = 'lightblue'
         
@@ -124,6 +131,38 @@ class RTPlotter:
                                         markeredgecolor=edge_color, markeredgewidth=2,
                                         label=f'Target {i+1}', zorder=5, alpha=0.8)
             self.spheres_3d.append(sphere_3d)
+        
+        # Initialize obstacle cylinder visualizations
+        for i, obstacle in enumerate(self.obstacles):
+            # Get obstacle color if available, otherwise use default
+            if hasattr(obstacle, 'obstacle_color'):
+                cylinder_color = obstacle.obstacle_color
+                edge_color = 'black'  # Dark edge for cylinders
+            else:
+                cylinder_color = 'gray'
+                edge_color = 'black'
+                
+            # For cylinders, we'll draw them as thick lines with markers at ends
+            # XY view cylinder (show as thick line)
+            cylinder_xy, = self.ax_xy.plot([], [], color=cylinder_color, linewidth=8, 
+                                          markeredgecolor=edge_color, markeredgewidth=1,
+                                          label=f'Obstacle {i+1}', zorder=3, alpha=0.7,
+                                          solid_capstyle='round')
+            self.cylinders_xy.append(cylinder_xy)
+            
+            # XZ view cylinder
+            cylinder_xz, = self.ax_xz.plot([], [], color=cylinder_color, linewidth=8, 
+                                          markeredgecolor=edge_color, markeredgewidth=1,
+                                          label=f'Obstacle {i+1}', zorder=3, alpha=0.7,
+                                          solid_capstyle='round')
+            self.cylinders_xz.append(cylinder_xz)
+            
+            # 3D view cylinder
+            cylinder_3d, = self.ax_3d.plot([], [], [], color=cylinder_color, linewidth=6, 
+                                          markeredgecolor=edge_color, markeredgewidth=1,
+                                          label=f'Obstacle {i+1}', zorder=3, alpha=0.7,
+                                          solid_capstyle='round')
+            self.cylinders_3d.append(cylinder_3d)
         
         # Initialize reference trajectory visualization elements
         if self.show_reference:
@@ -245,6 +284,56 @@ class RTPlotter:
                 self.spheres_xy[i].set_data([target_pos[0]], [target_pos[1]])
                 self.spheres_xz[i].set_data([target_pos[0]], [target_pos[2]])
                 self.spheres_3d[i].set_data_3d([target_pos[0]], [target_pos[1]], [target_pos[2]])
+        
+        # Update obstacle cylinder visualizations
+        for i, obstacle in enumerate(self.obstacles):
+            # Get obstacle position and geometry
+            if hasattr(obstacle, 'position_collection') and obstacle.position_collection.size > 0:
+                # Get obstacle base position - this is the start of the cylinder, not center
+                pos_data = obstacle.position_collection
+                if pos_data.ndim == 1:
+                    base_pos = pos_data.copy()
+                else:
+                    base_pos = pos_data[:, 0].copy() if pos_data.shape[1] > 0 else pos_data.flatten()
+                
+                # Ensure base_pos is a 1D array with 3 elements
+                base_pos = np.asarray(base_pos).flatten()[:3]
+                
+                # For visualization, we need to show the cylinder extent
+                # Try to get the actual length from the obstacle
+                if hasattr(obstacle, 'base_length'):
+                    cylinder_length = float(obstacle.base_length)
+                elif hasattr(obstacle, 'length'):
+                    cylinder_length = float(obstacle.length)
+                else:
+                    cylinder_length = 0.4  # Default length
+                
+                # Calculate start and end points for vertical cylinder
+                # base_pos is the start (bottom), so end is base_pos + length in z direction
+                start_pos = base_pos.copy()
+                end_pos = base_pos + np.array([0.0, 0.0, cylinder_length])
+                
+                # Update cylinder visualizations
+                # XY view (show as circle - cross-section of vertical cylinder)
+                circle = matplotlib.patches.Circle((start_pos[0], start_pos[1]), 
+                                   obstacle.base_radius if hasattr(obstacle, 'base_radius') else 0.05, 
+                                   color=obstacle.obstacle_color if hasattr(obstacle, 'obstacle_color') else 'gray',
+                                   alpha=0.7, zorder=3)
+                # Remove previous circle if exists
+                if hasattr(self.cylinders_xy[i], '_circle'):
+                    self.cylinders_xy[i]._circle.remove()
+                # Add new circle
+                self.cylinders_xy[i]._circle = self.ax_xy.add_patch(circle)
+                # Keep line data empty for XY view since we're using circle
+                self.cylinders_xy[i].set_data([], [])
+                
+                # XZ view (should show as a vertical line for vertical cylinders)
+                self.cylinders_xz[i].set_data([start_pos[0], end_pos[0]], [start_pos[2], end_pos[2]])
+                
+                # 3D view
+                self.cylinders_3d[i].set_data_3d([start_pos[0], end_pos[0]], 
+                                                 [start_pos[1], end_pos[1]], 
+                                                 [start_pos[2], end_pos[2]])
         
         # Update reference trajectory visualization
         if self.show_reference and self.reference_position is not None:

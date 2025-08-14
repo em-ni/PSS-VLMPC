@@ -87,15 +87,17 @@ if __name__ == "__main__":
 
     all_rod_data_files = glob.glob(os.path.join(DATA_PATH, "rod*.dat"))
     all_target_data_files = glob.glob(os.path.join(DATA_PATH, "target*.dat"))
+    all_obstacle_data_files = glob.glob(os.path.join(DATA_PATH, "obstacle*.dat"))
     
     if not all_rod_data_files:
         raise FileNotFoundError(f"No rod*.dat files found in '{DATA_PATH}'")
 
     all_rod_data = []
     all_target_data = []
+    all_obstacle_data = []
     max_runtime = 0.0
 
-    print(f"Found {len(all_rod_data_files)} rod data files and {len(all_target_data_files)} target data files in '{DATA_PATH}'. Loading all...")
+    print(f"Found {len(all_rod_data_files)} rod data files, {len(all_target_data_files)} target data files, and {len(all_obstacle_data_files)} obstacle data files in '{DATA_PATH}'. Loading all...")
 
     # Load rod data
     for data_file_path in all_rod_data_files:
@@ -132,6 +134,26 @@ if __name__ == "__main__":
             raise
         
         all_target_data.append(data)
+        if "time" in data and len(data["time"]) > 0:
+            max_runtime = max(max_runtime, np.array(data["time"]).max())
+        else:
+            print(f"Warning: Data file {data_file_path} has no 'time' key or empty time data.")
+    
+    # Load obstacle data
+    for data_file_path in all_obstacle_data_files:
+        try:
+            if SAVE_PICKLE:
+                import pickle as pk
+                with open(data_file_path, "rb") as fptr:
+                    data = pk.load(fptr)
+            else:
+                raise NotImplementedError("Only pickled data is supported")
+        except OSError as err:
+            print(f"Cannot open the datafile {data_file_path}")
+            print(str(err))
+            raise
+        
+        all_obstacle_data.append(data)
         if "time" in data and len(data["time"]) > 0:
             max_runtime = max(max_runtime, np.array(data["time"]).max())
         else:
@@ -216,6 +238,42 @@ if __name__ == "__main__":
 
         all_interpolated_target_positions.append(interpolated_target_position)
 
+    # Interpolate obstacle data
+    all_interpolated_obstacle_positions = []
+
+    for i, data_entry in enumerate(all_obstacle_data):
+        current_times = np.array(data_entry["time"])
+        current_positions = np.array(data_entry["position"])
+
+        if len(current_times) == 0 or current_positions.shape[0] == 0:
+            print(f"Skipping interpolation for obstacle {i+1} with empty time or position data.")
+            # Create static obstacle at origin if no data
+            static_position = np.zeros((total_frame, 3))
+            all_interpolated_obstacle_positions.append(static_position)
+            continue
+
+        # Obstacle position is usually a single point (center of cylinder)
+        if current_positions.ndim == 2 and current_positions.shape[1] == 3:
+            # Position data is [time, 3] format
+            f_interp = interpolate.interp1d(current_times, current_positions, axis=0,
+                                            fill_value=(current_positions[0], current_positions[-1]),
+                                            bounds_error=False)
+            interpolated_obstacle_position = f_interp(times_true)
+        elif current_positions.ndim == 3 and current_positions.shape[1] == 3:
+            # Position data is [time, 3, 1] format (single point)
+            positions_2d = current_positions[:, :, 0]  # Extract [time, 3]
+            f_interp = interpolate.interp1d(current_times, positions_2d, axis=0,
+                                            fill_value=(positions_2d[0], positions_2d[-1]),
+                                            bounds_error=False)
+            interpolated_obstacle_position = f_interp(times_true)
+        else:
+            print(f"Warning: Unexpected obstacle position data shape: {current_positions.shape}")
+            # Create static obstacle at first position
+            first_pos = current_positions[0] if current_positions.ndim == 2 else current_positions[0, :, 0]
+            interpolated_obstacle_position = np.tile(first_pos, (total_frame, 1))
+
+        all_interpolated_obstacle_positions.append(interpolated_obstacle_position)
+
     # Rendering
     batch = []
     view_name = "diag"
@@ -269,6 +327,36 @@ if __name__ == "__main__":
                 color=pov_color,
             )
             script.append(target_object)
+
+        # Render obstacles as gray cylinders
+        obstacle_color = 'rgb<0.5,0.5,0.5>'  # Gray color
+        
+        for obstacle_idx, obstacle_position in enumerate(all_interpolated_obstacle_positions):
+            # Convert coordinates from (x,y,z) to (-y,x,z)
+            original_position = obstacle_position[frame_number]
+            converted_position = np.array([original_position[1], -original_position[0], original_position[2]])
+            
+            # Create cylinder from base to top (length 0.4 as defined in Sim.py)
+            cylinder_length = 0.4
+            base_position = converted_position
+            top_position = base_position + np.array([0, 0, cylinder_length])
+            
+            # POV-Ray cylinder syntax: cylinder { <base>, <top>, radius texture { ... } }
+            cylinder_object = f"""cylinder {{
+    <{base_position[0]:.6f}, {base_position[1]:.6f}, {base_position[2]:.6f}>,
+    <{top_position[0]:.6f}, {top_position[1]:.6f}, {top_position[2]:.6f}>,
+    0.05
+    texture {{
+        pigment {{ color {obstacle_color} }}
+        finish {{ 
+            ambient 0.3
+            diffuse 0.7
+            specular 0.2
+            roughness 0.1
+        }}
+    }}
+}}"""
+            script.append(cylinder_object)
 
         pov_script = "\n".join(script)
 

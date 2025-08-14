@@ -126,13 +126,15 @@ def main():
     global CONTROL_MODE
     # init sim
     print("Initializing Constant Curvature Simulation...")
-    cc_sim = Sim(**simulation_params, with_targets=True)
+    cc_sim = Sim(**simulation_params, with_targets=True, with_obstacles=True)
     
     # Get simulation components
     rods_list = cc_sim.get_rods()
     targets_list = cc_sim.get_targets()
+    obstacles_list = cc_sim.get_obstacles()
     callback_params = cc_sim.get_callback_params()
     target_callback_params = cc_sim.get_target_callback_params()
+    obstacle_callback_params = cc_sim.get_obstacle_callback_params()
     
     # Print simulation info
     sim_info = cc_sim.get_simulation_info()
@@ -144,7 +146,7 @@ def main():
     plotter = None
     if REAL_TIME_PLOT and current_backend != 'Agg':
         print("\nSetting up real-time plotter...")
-        plotter = RTPlotter(rods_list, targets=targets_list)
+        plotter = RTPlotter(rods_list, targets=targets_list, obstacles=obstacles_list)
     elif REAL_TIME_PLOT and current_backend == 'Agg':
         print("\nWarning: Real-time plotting disabled - using non-interactive backend 'Agg'")
     
@@ -252,10 +254,10 @@ def main():
                     target_history=history_target_position[-50:] if history_target_position else None
                 )
                     
-                # # Save first scene image for debugging
-                # if i == 0 and scene_image is not None:
-                #     vlm.save_scene_image(filename='initial_vlm_view.png')
-                #     print("Initial scene image saved as 'initial_vlm_view.png'")
+                # Save first scene image for debugging
+                if i == 0 and scene_image is not None:
+                    vlm.save_scene_image(filename='initial_vlm_view.png')
+                    print("Initial scene image saved as 'initial_vlm_view.png'")
 
                 # Process VLM input with visual context
                 new_trajectory, target_name = vlm.process_user_input(x_current_vlm, scene_image)
@@ -435,6 +437,13 @@ def main():
             with open(filename, "wb") as file:
                 pickle.dump(params, file)
             print(f"Saved target {i+1} data to {filename}")
+            
+        # Save data for each obstacle
+        for i, params in enumerate(obstacle_callback_params):
+            filename = f"results/obstacle{i+1}.dat"
+            with open(filename, "wb") as file:
+                pickle.dump(params, file)
+            print(f"Saved obstacle {i+1} data to {filename}")
 
     print("\nAll done!")
 
