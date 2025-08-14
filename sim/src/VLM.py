@@ -87,6 +87,7 @@ class VLM:
             'down': np.array([0.0, -0.5, -0.5, 0.0, 0.0, 0.0]),
             'center': np.array([0.0, 0.0, -0.8, 0.0, 0.0, 0.0])
         }
+        self.default_target = self.targets['center']  
         
         # State variables
         self.current_target = None
@@ -94,30 +95,34 @@ class VLM:
         self.processing = False
         self.last_response = "VLM initialized. Type commands like 'go right', 'move left', etc."
         self.current_scene_image = None  # Store the latest scene image
-        
+        self.waypoints = []  # Store waypoints from VLM
+
         # Visualization parameters for scene reconstruction
         self.xlim = (-1.0, 1.0)
         self.ylim = (-1.0, 1.0)
         self.zlim = (-1.0, 1.0)
         self.colors = ['red', 'blue', 'orange', 'purple']
         
+#         # System prompt for the VLM
+#         self.system_prompt = """You are a soft robot controller, your goal is to assign the 2D coordinates of the target, where the tip of the robot will be steered after your output. You see the XY plane of the robot's workspace, you can see the robot tip colored in as a black dot, and the current target colored as a green dot. You are able to assign the position of the latter, and the tip possiotn will be controlled to follow the target. Respond with EXACTLY with two numbers separated by a comma.
+# You have to understand the user intention, and output the target position in the XY plane WITHIN the workspace limits. For example the use might want the robot to touch a certain object in the workspace, or to move to a certain position, or to move in a certain direction. 
+# Possible examples:
+# "touch the red circle" → 0.5,0.5 (coordinates of the red circle you deduced from the image)
+# "move right" → 0.5,0.0 (you deduce the tip position is at (0,0) and you set the target to (0.5,0))
+# "avoid the yellow square" → 0.0,-0.5 (you deduce the yellow square is at (0, -0.5), you see the tip is close to it and you set the target away from it (0, 0.5))
+
+# CRITICAL RULES:
+# - NO quotes, NO periods, NO punctuation
+# - NO explanations or descriptions
+# - ONLY the two numbers separated by a comma
+# - The numbers must be within the workspace limits: X in [-1.0, 1.0], Y in [-1.0, 1.0]
+# - The first number is the X coordinate, the second number is the Y coordinate
+# - Do not add anything else
+# """
         # System prompt for the VLM
-        self.system_prompt = """You are a soft robot controller, your goal is to assign the 2D coordinates of the target, where the tip of the robot will be steered after your output. You see the XY plane of the robot's workspace, you can see the robot tip colored in as a black dot, and the current target colored as a green dot. You are able to assign the position of the latter, and the tip possiotn will be controlled to follow the target. Respond with EXACTLY with two numbers separated by a comma.
-You have to understand the user intention, and output the target position in the XY plane WITHIN the workspace limits. For example the use might want the robot to touch a certain object in the workspace, or to move to a certain position, or to move in a certain direction. 
-Possible examples:
-"touch the red circle" → 0.5,0.5 (coordinates of the red circle you deduced from the image)
-"move right" → 0.5,0.0 (you deduce the tip position is at (0,0) and you set the target to (0.5,0))
-"avoid the yellow square" → 0.0,-0.5 (you deduce the yellow square is at (0, -0.5), you see the tip is close to it and you set the target away from it (0, 0.5))
-
-CRITICAL RULES:
-- NO quotes, NO periods, NO punctuation
-- NO explanations or descriptions
-- ONLY the two numbers separated by a comma
-- The numbers must be within the workspace limits: X in [-1.0, 1.0], Y in [-1.0, 1.0]
-- The first number is the X coordinate, the second number is the Y coordinate
-- Do not add anything else
-"""
-
+        with open(os.path.join(os.path.dirname(__file__), "prompt.txt"), "r") as f:
+            self.system_prompt = f.read()
+            
     def check_server(self):
         """Check if the backend is available."""
         if self.backend == "llama":
@@ -356,36 +361,7 @@ CRITICAL RULES:
             self.last_response = response.text
             raw_result = response.text
             print(f"Gemini raw response: {raw_result}")
-            
-            # Check if it is in the expected format: x,y
-            # Check if response is in x,y format
-            if ',' in raw_result:
-                try:
-                    # Try to parse as x,y coordinates
-                    parts = raw_result.strip().split(',')
-                    if len(parts) == 2:
-                        x = float(parts[0].strip())
-                        y = float(parts[1].strip())
-                        
-                        # Validate coordinates are within workspace limits
-                        if self.xlim[0] <= x <= self.xlim[1] and self.ylim[0] <= y <= self.ylim[1]:
-                            print(f"Gemini coordinates parsed: ({x}, {y})")
-                            target = f"{x},{y}"
-                        else:
-                            print(f"Coordinates out of bounds: ({x}, {y}), defaulting to center")
-                            target = "0.0,0.0"
-                    else:
-                        print(f"Invalid coordinate format, defaulting to center")
-                        target = "0.0,0.0"
-                except ValueError:
-                    print(f"Could not parse coordinates, defaulting to center")
-                    target = "0.0,0.0"
-            else:
-                # Not right format default to center target
-                print(f"Response not in x,y format: '{raw_result}', defaulting to center")
-                target = "0.0,0.0"
-                
-            return target
+            return raw_result.strip()
             
         except Exception as e:
             error_msg = f"Gemini API error: {str(e)}"
@@ -418,6 +394,39 @@ CRITICAL RULES:
             trajectory[i] = current_state + smooth_alpha * (target_state - current_state)
             
         return trajectory
+
+    def generate_trajectory_from_waypoints(self, current_state, waypoints, transition_time=5.0, wp_hold_steps=20):
+        """
+        Generate a trajectory from current state to a series of waypoints.
+        
+        Args:
+            current_state (np.array): Current 6D state [pos_x, pos_y, pos_z, vel_x, vel_y, vel_z]
+            waypoints (list of float): [x1,y1,x2,y2,...,xn,yn] 
+            transition_time (float): Time to reach target in seconds
+            
+        Returns:
+            np.array: Trajectory array of shape (n_steps, 6)
+        """
+
+        # Create target states from waypoints
+        target_states = []
+        for i in range(0, len(waypoints), 2):
+            target_states.append(np.array([waypoints[i], waypoints[i+1], -0.5, 0.0, 0.0, 0.0]))
+
+        # Generate trajectory through each waypoint
+        full_trajectory = []
+        for target_state in target_states:
+            trajectory = self.generate_trajectory(current_state, target_state, transition_time)
+            # Append hold steps at the end of each segment
+            if wp_hold_steps > 0:
+                hold_state = target_state.copy()
+                hold_state[3:] = 0.0
+                hold_trajectory = np.tile(hold_state, (wp_hold_steps, 1))
+                trajectory = np.concatenate((trajectory, hold_trajectory))
+            full_trajectory.append(trajectory)
+            current_state = target_state
+
+        return np.concatenate(full_trajectory)
 
     def start_input_thread(self):
         self.running = True
@@ -466,14 +475,9 @@ CRITICAL RULES:
             vlm_response = None
             if scene_image:
                 vlm_response = self.query_vlm(user_input, scene_image)
-                
-            # If image query failed or no image, try text-only
-            if vlm_response is None:
-                print("Trying text-only VLM query...")
-                vlm_response = self.query_vlm(user_input, scene_image=None)
             
             if vlm_response is None:
-                print("VLM query failed completely")
+                print("VLM query failed")
                 if self.web_ui: self.ui.add_response("❌ VLM query failed")
                 return None, None
                 
@@ -492,31 +496,64 @@ CRITICAL RULES:
             
             # Handle movement commands
             try:
-                coords = vlm_response.split(',')
-                if len(coords) == 2:
-                    x = float(coords[0].strip())
-                    y = float(coords[1].strip())
+                # coords = vlm_response.split(',')
+                # if len(coords) == 2:
+                #     x = float(coords[0].strip())
+                #     y = float(coords[1].strip())
                     
-                    # Validate coordinates
-                    if self.xlim[0] <= x <= self.xlim[1] and self.ylim[0] <= y <= self.ylim[1]:
-                        target_state = np.array([x, y, -0.5, 0.0, 0.0, 0.0])  # Z and velocities are zero
-                        print(f"Moving to coordinates: ({x}, {y})")
-                        if self.web_ui: self.ui.add_status_update(f"Moving to ({x:.2f}, {y:.2f})")
+                #     # Validate coordinates
+                #     if self.xlim[0] <= x <= self.xlim[1] and self.ylim[0] <= y <= self.ylim[1]:
+                #         target_state = np.array([x, y, -0.5, 0.0, 0.0, 0.0])  # Z and velocities are zero
+                #         print(f"Moving to coordinates: ({x}, {y})")
+                #         if self.web_ui: self.ui.add_status_update(f"Moving to ({x:.2f}, {y:.2f})")
                         
-                        # Generate trajectory
-                        trajectory = self.generate_trajectory(current_state, target_state)
-                        self.current_target = f"{x},{y}"
-                        self.current_trajectory = trajectory
+                #         # Generate trajectory
+                #         trajectory = self.generate_trajectory(current_state, target_state)
+                #         self.current_target = f"{x},{y}"
+                #         self.current_trajectory = trajectory
                         
-                        return trajectory, f"{x},{y}"
-                    else:
-                        print(f"Coordinates out of bounds: ({x}, {y}), defaulting to center")
-                        if self.web_ui: self.ui.add_response("❌ Coordinates out of bounds")
-                        return None, None
-                else:
-                    print(f"Invalid coordinate format: '{vlm_response}', defaulting to center")
+                #         return trajectory, f"{x},{y}"
+                #     else:
+                #         print(f"Coordinates out of bounds: ({x}, {y}), defaulting to center")
+                #         if self.web_ui: self.ui.add_response("❌ Coordinates out of bounds")
+                #         return None, None
+                # else:
+                #     print(f"Invalid coordinate format: '{vlm_response}', defaulting to center")
+                #     if self.web_ui: self.ui.add_response("❌ Invalid coordinate format")
+                #     return None, None
+                
+                # Check if response is in waypoint format (x1,y1,x2,y2,...,xn,yn)
+                coords = vlm_response.split(',')
+                waypoints = []
+                try:
+                    for coord in coords:
+                        if self.xlim[0] <= float(coord.strip()) <= self.xlim[1] and self.ylim[0] <= float(coord.strip()) <= self.ylim[1]:
+                            waypoints.append(float(coord.strip()))
+                        else:
+                            print(f"Coordinates out of bounds in response: '{vlm_response}', defaulting to center")
+                            if self.web_ui: self.ui.add_response("❌ Coordinates out of bounds")
+                            return None, None
+                except ValueError:
+                    print(f"Invalid coordinate format in response: '{vlm_response}', defaulting to center")
                     if self.web_ui: self.ui.add_response("❌ Invalid coordinate format")
                     return None, None
+                
+                # Generate trajectory from waypoints
+                trajectory = self.generate_trajectory_from_waypoints(current_state, waypoints)
+
+                if trajectory is None:
+                    print(f"Failed to generate trajectory from waypoints: '{vlm_response}'")
+                    if self.web_ui: self.ui.add_response("❌ Failed to generate trajectory")
+                    return None, None
+
+                # Store waypoints
+                self.waypoints = vlm_response.split(',')
+                self.current_target = f"{self.waypoints[-2]},{self.waypoints[-1]}"
+                self.current_trajectory = trajectory
+                print(f"Generated trajectory with waypoints: {self.waypoints}")
+                
+                return trajectory, vlm_response
+
             except ValueError:
                 print(f"Could not parse coordinates from response: '{vlm_response}', defaulting to center")
                 if self.web_ui: self.ui.add_response("❌ Could not parse coordinates")
