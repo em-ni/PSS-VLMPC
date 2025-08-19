@@ -81,6 +81,8 @@ simulation_params = {
     'mpc_dt': 0.02
 }
 vlm_dt = 2.0
+with_targets = True
+with_obstacles = True
 
 def plot_predictions(y_true, y_pred, save_path):
     """Generates Predicted vs. Actual plots and saves the figure to a file."""
@@ -126,8 +128,8 @@ def main():
     global CONTROL_MODE
     # init sim
     print("Initializing Constant Curvature Simulation...")
-    cc_sim = Sim(**simulation_params, with_targets=True, with_obstacles=True)
-    
+    cc_sim = Sim(**simulation_params, with_targets=with_targets, with_obstacles=with_obstacles)
+
     # Get simulation components
     rods_list = cc_sim.get_rods()
     targets_list = cc_sim.get_targets()
@@ -146,7 +148,7 @@ def main():
     plotter = None
     if REAL_TIME_PLOT and current_backend != 'Agg':
         print("\nSetting up real-time plotter...")
-        plotter = RTPlotter(rods_list, targets=targets_list, obstacles=obstacles_list)
+        plotter = RTPlotter(rods_list, targets=targets_list if with_targets else None, obstacles=obstacles_list if with_obstacles else None)
     elif REAL_TIME_PLOT and current_backend == 'Agg':
         print("\nWarning: Real-time plotting disabled - using non-interactive backend 'Agg'")
     
@@ -254,10 +256,10 @@ def main():
                     target_history=history_target_position[-50:] if history_target_position else None
                 )
                     
-                # Save first scene image for debugging
-                if i == 0 and scene_image is not None:
-                    vlm.save_scene_image(filename='initial_vlm_view.png')
-                    print("Initial scene image saved as 'initial_vlm_view.png'")
+                # # Save first scene image for debugging
+                # if i == 0 and scene_image is not None:
+                #     vlm.save_scene_image(filename='initial_vlm_view.png')
+                #     print("Initial scene image saved as 'initial_vlm_view.png'")
 
                 # Process VLM input with visual context
                 new_trajectory, target_name = vlm.process_user_input(x_current_vlm, scene_image)

@@ -4,6 +4,7 @@ from elastica.boundary_conditions import FixedConstraint
 from elastica.joint import get_relative_rotation_two_systems
 from elastica.timestepper import extend_stepper_interface
 from elastica.rigidbody import Sphere, Cylinder
+from elastica.contact_forces import RodCylinderContact
 
 
 class ConstantCurvatureBase(
@@ -13,6 +14,7 @@ class ConstantCurvatureBase(
     ea.Damping,
     ea.CallBacks,
     ea.Connections,
+    ea.Contact,
 ):
     pass
 
@@ -146,7 +148,6 @@ class Sim:
         ]
         
         for i in range(len(obstacle_positions)):
-
             # Create a cylinder obstacle
             obstacle = Cylinder(
                 start=obstacle_positions[i],
@@ -162,6 +163,25 @@ class Sim:
             
             self.cc_sim.append(obstacle)
             self.obstacles.append(obstacle)
+            
+            
+        # Contact detection
+        for obstacle in self.obstacles:
+            # Constraint the obstacles
+            self.cc_sim.constrain(obstacle).using(
+                FixedConstraint,
+                constrained_position_idx=(0,),
+                constrained_director_idx=(0,),
+            )
+            for rod in self.rods:
+                # Detect contact between the rod and the obstacle
+                self.cc_sim.detect_contact_between(rod, obstacle).using(
+                    RodCylinderContact,
+                    k=1e6, 
+                    nu=1.0, 
+                    friction_coefficient=0.5
+                )
+
 
     def _setup_simulation(self):
         """Setup the complete simulation including rods, constraints, and forces."""

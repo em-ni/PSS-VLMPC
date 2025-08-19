@@ -2,5 +2,6 @@ TODO:
 - give more emphasis to the stability, for now it's not checked after the target assignment from the vlm
   for example I can compute the region of attraction given the current: state, ref, Q, R, LAMBDA
   then the vlm can predict the next target inside it (ref) and the next value for the parameters (to be used to recompute the roa at the next step)
-- try using the VLM to predict a series of waypoints in place of a single target
-- use the waypoint prediction to perform more complex tasks (e.g. live obstacle avoidance)
+- as written in stability_check think of using the dataset to train the NN as a lookup for the terminal cost
+  For example take the u_ref corresponding the the x_ref or even approximate the solution of DARE
+- write about the optimality gap for the case of NN used both in the mpc and in the DARE
