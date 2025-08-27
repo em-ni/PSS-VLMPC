@@ -18,7 +18,7 @@ from src.Sim import Sim
 from src.VLM import VLM
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
-mpc_project_path = os.path.join(project_root, 'ISS-VLMPC', 'generic-neural-mpc')
+mpc_project_path = os.path.join(project_root, 'PSS-VLMPC', 'generic-neural-mpc')
 if mpc_project_path not in sys.path:
     sys.path.append(mpc_project_path)
 from mpc_casadi_sim import MPCController
