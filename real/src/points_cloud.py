@@ -75,7 +75,7 @@ class PointsCloud:
 
 
 if __name__ == "__main__":
-    csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\sorolearn\data\exp_2025-07-01_15-18-16\output_exp_2025-07-01_15-18-16.csv"
+    csv_path = r"C:\Users\dogro\Desktop\Emanuele\github\ISS-VLMPC\data\exp_2025-07-01_15-18-16\output_exp_2025-07-01_15-18-16.csv"
     points_cloud = PointsCloud(csv_path)
     points_cloud.get_points_from_csv()
     points_cloud.plot_points()

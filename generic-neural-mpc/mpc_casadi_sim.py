@@ -36,7 +36,6 @@ class MPCConfig:
     X_MAX = [0.6, 0.6, 0.8, 0.2, 0.2, 0.2]
     X_MIN = [-0.6, -0.6, 0.0, -0.2, -0.2, -0.2]
 
-
     def stability_check(self):
         """
         Check if the MPC configuration is stable (based on Seel et. al., "Neural Network-Based Model Predictive Control with Input-to-State Stability")
@@ -67,7 +66,7 @@ class MPCConfig:
         The discussion above guarantees ISS inside a region of attraction around the reference, the size of this can be regulated by tuning lambda (Limon et al., "On the stability of constrained MPC without terminal constraint")
 
         In conclusion, if the cost is chosen such that A1 and A2 hold, the NN is chosen and trained such that A3 and A4 holds, the stability check requires to verify that for the parameters Q and R, LAMBDA is large enough to ensure x_0 is inside the region of attraction
-        This is done in find_stabilizing_lambda.
+        This is done in find_stabilizing_lambda, where the minimum LAMBDA is computed.
         """
         # Placeholder for stability check logic
         return True
@@ -155,7 +154,8 @@ class MPCController:
         self.x0 = self.opti.parameter(self.n_states, 1)
         self.x_ref = self.opti.parameter(self.n_states, 1)
         self.u_prev = self.opti.parameter(self.n_controls, 1)
-        
+        self.lambda_param = self.opti.parameter(1, 1)
+
         if self.nn_approximation_order > 0:
             # Linear approximation parameters
             self.A_params = [self.opti.parameter(self.n_states, self.n_states) for _ in range(MPCConfig.N)]
@@ -203,8 +203,8 @@ class MPCController:
 
         # Terminal cost
         x_terminal_error = self.X[:, MPCConfig.N] - self.x_ref
-        cost += x_terminal_error.T @ self.P_terminal @ x_terminal_error
-        
+        cost += self.lambda_param * x_terminal_error.T @ self.P_terminal @ x_terminal_error
+
         self.opti.minimize(cost)
     
     def _setup_constraints(self):
@@ -258,6 +258,8 @@ class MPCController:
         Returns:
             float: computed robust lambda (np.inf if infeasible / denominator <= 0)
         """
+        debug = False 
+
         # short-hands / safety
         N = MPCConfig.N
         Q = self.Q_np
@@ -288,6 +290,7 @@ class MPCController:
         corners = np.array(corners)
         # Max distance from x_ref to corners
         R_e = float(np.max(np.linalg.norm(corners - x_ref.reshape(1, -1), axis=1)))
+        if debug:print(f"R_e (max state deviation from ref in box): {R_e:.4f}")
 
         # enumerate corners for inputs
         corners_u = []
@@ -299,6 +302,7 @@ class MPCController:
         corners_u = np.array(corners_u)
         # Max distance from u_ref to corners
         R_v = float(np.max(np.linalg.norm(corners_u - u_ref.reshape(1, -1), axis=1)))
+        if debug:print(f"R_v (max control deviation from ref in box): {R_v:.4f}")
 
         # Max eigenvalues
         q_eigs = np.linalg.eigvalsh(Q)
@@ -316,14 +320,21 @@ class MPCController:
         D = l_max
         L_N = N * D
         alpha = V_max
+        if debug: print(f"L_N (max cost over horizon): {L_N:.4f}, alpha (terminal cost): {alpha:.4f}, with l_max: {l_max:.4f}")
 
         # Lipschitz linear constants
         L_f = float(np.linalg.norm(A_terminal, 2))
         L_l = 2.0 * qmax * R_e
         L_V = 2.0 * tmax * R_e
+        if debug: print(f"L_f (A norm): {L_f:.4f}, L_l: {L_l:.4f}, L_V: {L_V:.4f}")
 
         # Delta terms
-        Delta_L_N = L_l * mu * (L_f ** N - 1)/(L_f - 1)
+        if abs(L_f - 1) < 1e-6:
+            geom_sum = N
+        else:
+            geom_sum = (L_f**N - 1)/(L_f - 1)
+        Delta_L_N = L_l * mu * geom_sum
+
         Delta_V = L_V * L_f**N * mu
 
         # Find rho from linearized closed loop system to bound the contraction of the terminal controller around the ref
@@ -333,11 +344,8 @@ class MPCController:
         Lchol = np.linalg.cholesky(P_matrix)  # P = L L^T
         P_inv_sqrt = np.linalg.inv(Lchol.T)
         M_rho = P_inv_sqrt @ (Acl.T @ (P_matrix @ Acl)) @ P_inv_sqrt
-        try:
-            rho = float(np.max(np.real(np.linalg.eigvals(M_rho))))
-        except Exception as e:
-            print(f"Error computing rho: {e}")
-            rho = 0.9
+        rho = float(np.max(np.real(np.linalg.eigvals(M_rho))))
+        if debug: print(f"rho (closed-loop contraction rate): {rho:.6f}")
 
         # This can be done smartly, higher d -> lower lambda, worst case is d tends 0
         d = 0.001
@@ -360,9 +368,9 @@ class MPCController:
         # Safety check for extremely large values
         if lambda_robust > 1e6:
             print(f"Warning: Computed lambda ({lambda_robust:.2e}) is very large, may indicate numerical issues")
-            
-        return float(lambda_robust)
 
+        # print(f"Computed robust lambda: {lambda_robust:.4f}")
+        return float(lambda_robust)
 
     def full_pytorch_model(self, x_and_u_torch):
         """Full PyTorch model with scaling"""
@@ -501,29 +509,26 @@ class MPCController:
         
         # Compute terminal cost matrix P by solving DARE with safety
         P_matrix, K_matrix = self.compute_terminal_cost_matrix(A_terminal, B_terminal, self.Q_np, self.R_np)
+        P_matrix += 1e-8 * np.eye(self.n_states)
+
+        # Ensure P_matrix is finite and positive definite
+        if not np.all(np.isfinite(P_matrix)):
+            print("Warning: P_matrix contains non-finite values, using Q as fallback")
+            P_matrix = self.Q_np 
 
         # Find stabilizing lambda
         lambda_robust = self.find_stabilizing_lambda(A_terminal, B_terminal, P_matrix, K_matrix, mu=1e-3, x_ref=x_ref.flatten(), u_ref=None)
         lambda_robust = -1 # Temp use default value
-        print(f"Computed robust lambda: {lambda_robust}")
 
         # Use robust lambda if finite, otherwise fall back to configured lambda
         if np.isfinite(lambda_robust) and lambda_robust > 0:
             self.LAMBDA = lambda_robust
         else:
             self.LAMBDA = MPCConfig.LAMBDA
-
-        # Multiply by the chosen scaling factor
-        P_matrix *= self.LAMBDA
-
-        # Ensure P_matrix is finite and positive definite
-        if not np.all(np.isfinite(P_matrix)):
-            print("Warning: P_matrix contains non-finite values, using Q as fallback")
-            P_matrix = self.Q_np * self.LAMBDA
-
-        self.opti.set_value(self.P_terminal, P_matrix)
         
         # Set Current Values and Solve
+        self.opti.set_value(self.lambda_param, np.array([[self.LAMBDA]]))
+        self.opti.set_value(self.P_terminal, P_matrix)
         self.opti.set_value(self.x0, x_current)
         self.opti.set_value(self.x_ref, x_ref)
         self.opti.set_value(self.u_prev, self.last_u_optimal)
@@ -603,7 +608,7 @@ class MPCController:
         plt.savefig(plot_path)
         print(f"\nMPC trajectory plot saved as '{plot_path}'.")
         
-def run_mpc_simulation(mode = 'spr', nn_approximation_order=1):
+def run_mpc_simulation(mode='spr', nn_approximation_order=1):
     """Main function to run MPC simulation"""
     # Initialize MPC controller
     mpc = MPCController(nn_approximation_order=nn_approximation_order)

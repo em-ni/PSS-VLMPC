@@ -18,7 +18,7 @@ from src.Sim import Sim
 from src.VLM import VLM
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
-mpc_project_path = os.path.join(project_root, 'sorolearn', 'generic-neural-mpc')
+mpc_project_path = os.path.join(project_root, 'ISS-VLMPC', 'generic-neural-mpc')
 if mpc_project_path not in sys.path:
     sys.path.append(mpc_project_path)
 from mpc_casadi_sim import MPCController
@@ -64,7 +64,7 @@ FINAL_TIME = 10
 # CONTROL_MODE = "spr" # set point regulation
 # CONTROL_MODE = "tt"  # trajectory tracking
 CONTROL_MODE = "vlm"  # VLM control
-APPROXIMATION_ORDER = 1
+APPROXIMATION_ORDER = 2
 
 # rod parameters
 simulation_params = {
@@ -82,7 +82,7 @@ simulation_params = {
 }
 vlm_dt = 2.0
 with_targets = True
-with_obstacles = True
+with_obstacles = False
 
 def plot_predictions(y_true, y_pred, save_path):
     """Generates Predicted vs. Actual plots and saves the figure to a file."""
