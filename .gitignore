@@ -1,16 +1,16 @@
 # MATLAB files
-MATLAB/send_pressure_udp_quarc_win64/*
-MATLAB/slprj/*
-MATLAB/send_pressure_udp.rt*
-MATLAB/send_pressure_udp.slx.autosave
-MATLAB/initialPressure*
-Pressure.mat
+real/MATLAB/send_pressure_udp_quarc_win64/*
+real/MATLAB/slprj/*
+real/MATLAB/send_pressure_udp.rt*
+real/MATLAB/send_pressure_udp.slx.autosave
+real/MATLAB/initialPressure*
+real/Pressure.mat
 
 # Python files
 *__pycache__*
 
 # Data
-data/exp_*/cam*
+real/data/exp_*/cam*
 generic-neural-mpc/data/*.pth
 
 # sim
