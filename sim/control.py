@@ -64,7 +64,7 @@ FINAL_TIME = 10
 # CONTROL_MODE = "spr" # set point regulation
 # CONTROL_MODE = "tt"  # trajectory tracking
 CONTROL_MODE = "vlm"  # VLM control
-APPROXIMATION_ORDER = 2
+APPROXIMATION_ORDER = 1
 
 # rod parameters
 simulation_params = {

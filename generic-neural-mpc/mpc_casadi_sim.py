@@ -517,7 +517,7 @@ class MPCController:
             P_matrix = self.Q_np 
 
         # Find stabilizing lambda
-        lambda_robust = self.find_stabilizing_lambda(A_terminal, B_terminal, P_matrix, K_matrix, mu=1e-3, x_ref=x_ref.flatten(), u_ref=None)
+        # lambda_robust = self.find_stabilizing_lambda(A_terminal, B_terminal, P_matrix, K_matrix, mu=1e-3, x_ref=x_ref.flatten(), u_ref=None)
         lambda_robust = -1 # Temp use default value
 
         # Use robust lambda if finite, otherwise fall back to configured lambda

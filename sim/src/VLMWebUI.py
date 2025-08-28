@@ -145,7 +145,7 @@ class VLMWebHandler(BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="container">
-        <h1>ISS VLMPC Soft Robot</h1>
+        <h1>PSS VLMPC Soft Robot</h1>
         
         <div class="instructions">
             Examples: "move right", "touch the red target", "avoid purple obstacle", "stop"
