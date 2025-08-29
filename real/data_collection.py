@@ -25,7 +25,6 @@ def main(realtime: bool):
 
     if realtime:
         try:
-
             # Start explorer in a thread
             explorer_thread = threading.Thread(target=explorer.run_realtime)
             explorer_thread.start()
